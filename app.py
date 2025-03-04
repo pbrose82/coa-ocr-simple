@@ -443,7 +443,7 @@ HTML_TEMPLATE = '''
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-async def refresh_alchemy_token():
+def refresh_alchemy_token():
     """
     Refresh the Alchemy API token using the refresh token.
     Returns the access token for the specified tenant.
@@ -725,3 +725,183 @@ def extract():
             logging.info(f"Total processing time: {total_time:.2f} seconds")
             
             return jsonify(data)
+            
+        except Exception as e:
+            logging.error(f"Error processing file: {e}")
+            # Clean up the file in case of error
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            return jsonify({"error": str(e)}), 500
+    
+    return jsonify({"error": "File type not allowed"}), 400
+
+@app.route('/send-to-alchemy', methods=['POST'])
+def send_to_alchemy():
+    data = request.json
+    
+    if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+    
+    try:
+        # Extract the data received from the client
+        extracted_data = data.get('data', {})
+        
+        # Format purity value - extract just the numeric part
+        purity_value = format_purity_value(extracted_data.get('purity', ""))
+        
+        # Get a fresh access token from Alchemy
+        access_token = refresh_alchemy_token()
+        
+        if not access_token:
+            return jsonify({
+                "status": "error", 
+                "message": "Failed to authenticate with Alchemy API"
+            }), 500
+        
+        # Format data for Alchemy API - exactly matching the Postman structure
+        alchemy_payload = [
+            {
+                "processId": None,
+                "recordTemplate": "exampleParsing",
+                "properties": [
+                    {
+                        "identifier": "RecordName",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "CasNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('cas_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "Purity",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": purity_value,
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "LotNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('lot_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+        
+        # Send to Alchemy API
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
+        response = requests.post(ALCHEMY_API_URL, headers=headers, json=alchemy_payload)
+        
+        # Log response for debugging
+        logging.info(f"Alchemy API response status code: {response.status_code}")
+        logging.info(f"Alchemy API response: {response.text}")
+        
+        # Check if the request was successful
+        response.raise_for_status()
+        
+        # Try to extract the record ID from the response
+        record_id = None
+        record_url = None
+        try:
+            response_data = response.json()
+            # Extract record ID from response - adjust this based on actual response structure
+            if isinstance(response_data, list) and len(response_data) > 0:
+                if 'id' in response_data[0]:
+                    record_id = response_data[0]['id']
+                elif 'recordId' in response_data[0]:
+                    record_id = response_data[0]['recordId']
+            elif isinstance(response_data, dict):
+                if 'id' in response_data:
+                    record_id = response_data['id']
+                elif 'recordId' in response_data:
+                    record_id = response_data['recordId']
+                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                    if 'id' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['id']
+                    elif 'recordId' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['recordId']
+            
+            # If record ID was found, construct the URL
+            if record_id:
+                record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/{record_id}"
+                logging.info(f"Created record URL: {record_url}")
+            
+        except Exception as e:
+            logging.warning(f"Could not extract record ID from response: {e}")
+        
+        # Return success response with record URL if available
+        return jsonify({
+            "status": "success", 
+            "message": "Data successfully sent to Alchemy",
+            "response": response.json() if response.text else {"message": "No content in response"},
+            "record_id": record_id,
+            "record_url": record_url
+        })
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error sending to Alchemy: {e}")
+        
+        # Try to capture response content if available
+        error_response = None
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_response = e.response.json()
+            except:
+                error_response = {"text": e.response.text}
+        
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "details": error_response
+        }), 500
+        
+    except Exception as e:
+        logging.error(f"Error sending to Alchemy: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500

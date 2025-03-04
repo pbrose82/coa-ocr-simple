@@ -34,7 +34,7 @@ alchemy_token_cache = {
     "expires_at": 0  # Unix timestamp when the token expires
 }
 
-# HTML template - your existing template
+# HTML template with updated UI
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -63,26 +63,6 @@ HTML_TEMPLATE = '''
             border-radius: 4px;
             overflow-x: auto;
         }
-        .loader {
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 2s linear infinite;
-            margin: 20px auto;
-            display: none;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .api-settings {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
         .processing-status {
             display: none;
             margin-top: 15px;
@@ -95,12 +75,23 @@ HTML_TEMPLATE = '''
             margin-top: 10px;
             font-weight: bold;
         }
+        .logo {
+            max-height: 60px;
+            margin-right: 15px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
-<img src="/mnt/data/Alchemy.png" alt="Alchemy Logo" style="position: absolute; left: 10px; top: 10px; height: 50px;">
     <div class="container">
-        <h1 class="text-center mb-4">COA OCR to Alchemy</h1>
+        <div class="header">
+            <img src="data:image/png;base64,''' + ALCHEMY_LOGO_BASE64 + '''" alt="Alchemy Logo" class="logo">
+            <h1 class="mb-0">COA OCR to Alchemy</h1>
+        </div>
         
         <div class="alert alert-info">
             <strong>Tips for best results:</strong>
@@ -162,6 +153,9 @@ HTML_TEMPLATE = '''
                 
                 <div id="results" class="result-box" style="display: none;">
                     <h5>Extracted Data:</h5>
+                    <div class="d-flex justify-content-end mb-3">
+                        <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
+                    </div>
                     <table class="table table-bordered">
                         <tbody id="dataTable">
                             <!-- Data will be inserted here -->
@@ -175,25 +169,6 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
         </div>
-        
-        <div class="api-settings mt-4 card">
-            <div class="card-header">
-                <h5 class="mb-0">Alchemy API Settings</h5>
-            </div>
-            <div class="card-body">
-                <div class="alert alert-success">
-                    <strong>Authentication Upgrade!</strong> This app now supports Refresh Token authentication.
-                    No need to manually enter API Key - it's handled automatically.
-                </div>
-                <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
-<!-- Moved above -->
-                
-                <div id="apiResponse" class="mt-3" style="display: none;">
-                    <h5>API Response:</h5>
-                    <pre id="responseText"></pre>
-                </div>
-            </div>
-        </div>
     </div>
     
     <script>
@@ -204,8 +179,6 @@ HTML_TEMPLATE = '''
             const dataTable = document.getElementById('dataTable');
             const rawText = document.getElementById('rawText');
             const sendToAlchemy = document.getElementById('sendToAlchemy');
-            const apiResponse = document.getElementById('apiResponse');
-            const responseText = document.getElementById('responseText');
             const processingStatus = document.getElementById('processingStatus');
             const statusText = document.getElementById('statusText');
             const progressBar = document.getElementById('progressBar');
@@ -258,7 +231,6 @@ HTML_TEMPLATE = '''
                 rawText.textContent = '';
                 results.style.display = 'none';
                 sendToAlchemy.disabled = true;
-                apiResponse.style.display = 'none';
                 alchemyAlerts.style.display = 'none';
                 extractedData = null;
                 
@@ -397,10 +369,6 @@ HTML_TEMPLATE = '''
                     // Hide processing status
                     processingStatus.style.display = 'none';
                     
-                    // Show API response
-                    apiResponse.style.display = 'block';
-                    responseText.textContent = JSON.stringify(data, null, 2);
-                    
                     // Show appropriate alert
                     alchemyAlerts.style.display = 'block';
                     if (data.status === 'success') {
@@ -430,10 +398,6 @@ HTML_TEMPLATE = '''
                     successAlert.style.display = 'none';
                     errorAlert.style.display = 'block';
                     errorMessage.textContent = error.message || 'Failed to send data to Alchemy';
-                    
-                    // Show response area with error
-                    apiResponse.style.display = 'block';
-                    responseText.textContent = `Error: ${error.message}`;
                 });
             });
         });

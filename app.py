@@ -11,9 +11,6 @@ import logging
 import time
 from pdf2image import convert_from_path
 import PyPDF2
-import datetime
-import threading
-from functools import wraps
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,16 +20,9 @@ app = Flask(__name__)
 # Configuration
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
-
-# Alchemy API configuration
-ALCHEMY_ACCESS_TOKEN = os.getenv('ALCHEMY_ACCESS_TOKEN')
-ALCHEMY_REFRESH_TOKEN = os.getenv('ALCHEMY_REFRESH_TOKEN')
-ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://core-production.alchemy.cloud/core/api/v2/')
-ALCHEMY_RECORD_URL = os.getenv('ALCHEMY_RECORD_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
-
-# Token management
-TOKEN_LOCK = threading.Lock()
-TOKEN_EXPIRY = None
+ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
+ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.cloud/core/api/v2/create-record')
+ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
 
 # HTML template
 HTML_TEMPLATE = '''
@@ -176,7 +166,19 @@ HTML_TEMPLATE = '''
         </div>
         
         <div class="api-settings mt-4">
-            <h5>Actions</h5>
+            <h5>Alchemy API Settings</h5>
+            <div class="mb-3">
+                <label for="apiKey" class="form-label">API Key</label>
+                <input type="password" class="form-control" id="apiKey">
+            </div>
+            <div class="mb-3">
+                <label for="apiUrl" class="form-label">API URL</label>
+                <input type="text" class="form-control" id="apiUrl" value="https://core-production.alchemy.cloud/core/api/v2/create-record">
+            </div>
+            <div class="mb-3">
+                <label for="baseUrl" class="form-label">Alchemy Base URL</label>
+                <input type="text" class="form-control" id="baseUrl" value="https://app.alchemy.cloud/productcaseelnlims4uat/record/">
+            </div>
             <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
             
             <div id="apiResponse" class="mt-3" style="display: none;">
@@ -194,6 +196,9 @@ HTML_TEMPLATE = '''
             const dataTable = document.getElementById('dataTable');
             const rawText = document.getElementById('rawText');
             const sendToAlchemy = document.getElementById('sendToAlchemy');
+            const apiKey = document.getElementById('apiKey');
+            const apiUrl = document.getElementById('apiUrl');
+            const baseUrl = document.getElementById('baseUrl');
             const apiResponse = document.getElementById('apiResponse');
             const responseText = document.getElementById('responseText');
             const processingStatus = document.getElementById('processingStatus');
@@ -206,6 +211,24 @@ HTML_TEMPLATE = '''
             const errorAlert = document.getElementById('errorAlert');
             const errorMessage = document.getElementById('errorMessage');
             const recordLink = document.getElementById('recordLink');
+            
+            // Load saved API settings from localStorage
+            apiKey.value = localStorage.getItem('alchemyApiKey') || '';
+            apiUrl.value = localStorage.getItem('alchemyApiUrl') || 'https://core-production.alchemy.cloud/core/api/v2/create-record';
+            baseUrl.value = localStorage.getItem('alchemyBaseUrl') || 'https://app.alchemy.cloud/productcaseelnlims4uat/record/';
+            
+            // Save API settings to localStorage when changed
+            apiKey.addEventListener('change', () => {
+                localStorage.setItem('alchemyApiKey', apiKey.value);
+            });
+            
+            apiUrl.addEventListener('change', () => {
+                localStorage.setItem('alchemyApiUrl', apiUrl.value);
+            });
+            
+            baseUrl.addEventListener('change', () => {
+                localStorage.setItem('alchemyBaseUrl', baseUrl.value);
+            });
             
             // Set file input accept attribute based on file type selection
             imageOption.addEventListener('change', () => {
@@ -355,8 +378,8 @@ HTML_TEMPLATE = '''
             });
             
             sendToAlchemy.addEventListener('click', function() {
-                if (!extractedData) {
-                    alert('No data to send');
+                if (!extractedData || !apiKey.value || !apiUrl.value) {
+                    alert('Missing data or API settings');
                     return;
                 }
                 
@@ -372,7 +395,10 @@ HTML_TEMPLATE = '''
                 
                 // Format data for Alchemy's expected structure
                 const payload = {
-                    data: extractedData
+                    data: extractedData,
+                    api_key: apiKey.value,
+                    api_url: apiUrl.value,
+                    base_url: baseUrl.value
                 };
                 
                 fetch('/send-to-alchemy', {
@@ -431,64 +457,6 @@ HTML_TEMPLATE = '''
 </body>
 </html>
 '''
-
-def get_auth_token():
-    """Get the current Alchemy API token or refresh if needed"""
-    global ALCHEMY_ACCESS_TOKEN, ALCHEMY_REFRESH_TOKEN, TOKEN_EXPIRY
-
-    with TOKEN_LOCK:
-        # Check if token is expired or not set
-        current_time = datetime.datetime.now()
-        if not ALCHEMY_ACCESS_TOKEN or not TOKEN_EXPIRY or current_time >= TOKEN_EXPIRY:
-            # Need to refresh token
-            if not refresh_alchemy_token():
-                logging.error("Failed to refresh Alchemy token")
-                return None
-        
-        return ALCHEMY_ACCESS_TOKEN
-
-def refresh_alchemy_token():
-    """Refresh the Alchemy API token using the refresh token"""
-    global ALCHEMY_ACCESS_TOKEN, ALCHEMY_REFRESH_TOKEN, TOKEN_EXPIRY
-    
-    if not ALCHEMY_REFRESH_TOKEN:
-        logging.error("No refresh token available")
-        return False
-    
-    try:
-        # Use the correct endpoint and HTTP method
-        refresh_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/refresh-token"
-        headers = {
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "refreshToken": ALCHEMY_REFRESH_TOKEN
-        }
-        
-        # Using PUT method instead of POST
-        response = requests.put(refresh_url, headers=headers, json=payload)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if 'accessToken' in data:
-            ALCHEMY_ACCESS_TOKEN = data['accessToken']
-            if 'refreshToken' in data:
-                ALCHEMY_REFRESH_TOKEN = data['refreshToken']
-            
-            # Set token expiry (default to 1 hour if not specified)
-            expiry_seconds = int(data.get('expiresIn', 3600)) - 300  # 5 minutes buffer
-            TOKEN_EXPIRY = datetime.datetime.now() + datetime.timedelta(seconds=expiry_seconds)
-            
-            logging.info(f"Alchemy token refreshed, valid until {TOKEN_EXPIRY}")
-            return True
-        else:
-            logging.error("Failed to get access token from refresh response")
-            return False
-            
-    except Exception as e:
-        logging.error(f"Error refreshing Alchemy token: {e}")
-        return False
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -739,13 +707,13 @@ def send_to_alchemy():
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
     
-    # Get token
-    token = get_auth_token()
-    if not token:
-        return jsonify({
-            "status": "error", 
-            "message": "No authentication token available"
-        }), 401
+    # Get API key and URL from request or environment variables
+    api_key = data.get('api_key') or ALCHEMY_API_KEY
+    api_url = data.get('api_url') or ALCHEMY_API_URL
+    base_url = data.get('base_url') or ALCHEMY_BASE_URL
+    
+    if not api_key:
+        return jsonify({"status": "error", "message": "Missing API key"}), 400
     
     try:
         # Extract the data received from the client
@@ -754,26 +722,80 @@ def send_to_alchemy():
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))
         
-        # Let's try a simpler approach - post directly to the endpoint
-        create_record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/create-record"
+        # Format data for Alchemy API - exactly matching the Postman structure
+        alchemy_payload = [
+            {
+                "processId": None,
+                "recordTemplate": "exampleParsing",
+                "properties": [
+                    {
+                        "identifier": "RecordName",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "CasNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('cas_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "Purity",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": purity_value,
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "LotNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('lot_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
         
-        # Try a simpler payload structure without specifying a template
-        alchemy_payload = {
-            "RecordName": extracted_data.get('product_name', "Unknown Product"),
-            "CasNumber": extracted_data.get('cas_number', ""),
-            "Purity": purity_value,
-            "LotNumber": extracted_data.get('lot_number', "")
-        }
-        
-        # Send to Alchemy API using the token
+        # Send to Alchemy API
         headers = {
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
         logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
-        logging.info(f"URL: {create_record_url}")
-        response = requests.post(create_record_url, headers=headers, json=alchemy_payload)
+        response = requests.post(api_url, headers=headers, json=alchemy_payload)
         
         # Log response for debugging
         logging.info(f"Alchemy API response status code: {response.status_code}")
@@ -782,23 +804,37 @@ def send_to_alchemy():
         # Check if the request was successful
         response.raise_for_status()
         
-        # Extract record ID and build URL
+        # Try to extract the record ID from the response
         record_id = None
         record_url = None
         try:
             response_data = response.json()
-            if isinstance(response_data, dict):
+            # Extract record ID from response - adjust this based on actual response structure
+            if isinstance(response_data, list) and len(response_data) > 0:
+                if 'id' in response_data[0]:
+                    record_id = response_data[0]['id']
+                elif 'recordId' in response_data[0]:
+                    record_id = response_data[0]['recordId']
+            elif isinstance(response_data, dict):
                 if 'id' in response_data:
                     record_id = response_data['id']
                 elif 'recordId' in response_data:
                     record_id = response_data['recordId']
+                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                    if 'id' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['id']
+                    elif 'recordId' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['recordId']
             
+            # If record ID was found, construct the URL
             if record_id:
-                record_url = f"{ALCHEMY_RECORD_URL.rstrip('/')}/{record_id}"
+                record_url = f"{base_url.rstrip('/')}/{record_id}"
                 logging.info(f"Created record URL: {record_url}")
+            
         except Exception as e:
             logging.warning(f"Could not extract record ID from response: {e}")
         
+        # Return success response with record URL if available
         return jsonify({
             "status": "success", 
             "message": "Data successfully sent to Alchemy",
@@ -809,6 +845,8 @@ def send_to_alchemy():
         
     except requests.exceptions.RequestException as e:
         logging.error(f"Request error sending to Alchemy: {e}")
+        
+        # Try to capture response content if available
         error_response = None
         if hasattr(e, 'response') and e.response:
             try:
@@ -828,7 +866,7 @@ def send_to_alchemy():
             "status": "error", 
             "message": str(e)
         }), 500
-        
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)

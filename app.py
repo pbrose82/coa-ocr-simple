@@ -752,10 +752,10 @@ def extract():
             
             return jsonify(data)
             
-        except Exception as e:
+      except Exception as e:
             logging.error(f"Error processing file: {e}")
             # Clean up the file in case of error
-if os.path.exists(filepath):
+            if os.path.exists
                 try:
                     os.remove(filepath)
                 except:

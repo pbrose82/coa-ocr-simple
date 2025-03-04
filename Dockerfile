@@ -4,7 +4,7 @@ FROM python:3.9-slim
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
-    poppler-utils \  # Add this line for PDF support
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

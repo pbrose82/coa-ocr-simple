@@ -1,14 +1,12 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 import os
-import pytesseract
-from PIL import Image
-import re
-import json
 import requests
 import time
 import logging
 from werkzeug.utils import secure_filename
 import uuid
+from PIL import Image
+import pytesseract
 from pdf2image import convert_from_path
 import PyPDF2
 
@@ -17,23 +15,18 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 app = Flask(__name__)
 
-# Configuration
+# Configuration from environment variables
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Environment Variables
-ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.cloud/core/api/v2/create-record')
-ALCHEMY_REFRESH_URL = os.getenv('ALCHEMY_API_REFRESH_URL', 'https://core-production.alchemy.cloud/core/api/v2/refresh-token')
-
-ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
+ALCHEMY_REFRESH_URL = os.getenv('ALCHEMY_REFRESH_URL', 'https://core-production.alchemy.cloud/core/api/v2/refresh-token')
+ALCHEMY_UPDATE_URL = os.getenv('ALCHEMY_UPDATE_URL', 'https://core-production.alchemy.cloud/core/api/v2/update-record')
+ALCHEMY_REFRESH_TOKEN = os.getenv('ALCHEMY_REFRESH_TOKEN')
+TENANT_NAME = os.getenv('ALCHEMY_TENANT_NAME', 'productcaseelnlims4uat')
 
 # Token Cache
 TOKEN_CACHE = {"access_token": None, "expires_at": 0}
-
-# Utility Functions
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_access_token():
     """Retrieve the access token, refreshing it if expired."""
@@ -42,25 +35,23 @@ def get_access_token():
     if TOKEN_CACHE["access_token"] and time.time() < TOKEN_CACHE["expires_at"]:
         return TOKEN_CACHE["access_token"]
 
-    logging.info("Refreshing API token...")
-    response = requests.post(
-        ALCHEMY_REFRESH_URL,
-        data={
-            "grant_type": "client_credentials",
-            "client_id": ALCHEMY_CLIENT_ID,
-            "client_secret": ALCHEMY_CLIENT_SECRET
-        }
-    )
+    logging.info("Refreshing Alchemy API token...")
+    response = requests.put(ALCHEMY_REFRESH_URL, json={"refreshToken": ALCHEMY_REFRESH_TOKEN})
 
     if response.status_code == 200:
         data = response.json()
-        TOKEN_CACHE["access_token"] = data["access_token"]
-        TOKEN_CACHE["expires_at"] = time.time() + data["expires_in"] - 60  # Refresh 1 minute before expiry
+        tenant_token = next((t for t in data["tokens"] if t["tenant"] == TENANT_NAME), None)
+
+        if not tenant_token:
+            raise Exception(f"Tenant '{TENANT_NAME}' not found in token response.")
+
+        TOKEN_CACHE["access_token"] = tenant_token["accessToken"]
+        TOKEN_CACHE["expires_at"] = time.time() + 3600  # Assuming 1 hour token validity
         logging.info("Token refreshed successfully.")
         return TOKEN_CACHE["access_token"]
-    else:
-        logging.error(f"Failed to refresh token: {response.text}")
-        raise Exception("Failed to obtain access token")
+    
+    logging.error(f"Failed to refresh token: {response.text}")
+    raise Exception("Failed to obtain access token")
 
 def extract_text_from_pdf(pdf_path):
     """Extract text directly from a text-based PDF."""
@@ -68,9 +59,9 @@ def extract_text_from_pdf(pdf_path):
         text = ""
         with open(pdf_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
-            for page_num in range(min(2, len(reader.pages))):
-                text += reader.pages[page_num].extract_text() or ""
-        return text if len(text.strip()) > 50 else None
+            for page in reader.pages[:2]:  # Extract only first 2 pages
+                text += page.extract_text() or ""
+        return text if text.strip() else None
     except Exception as e:
         logging.error(f"Error extracting text from PDF: {e}")
         return None
@@ -86,7 +77,7 @@ def parse_coa_data(text):
         "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM)",
         "purity": r"(?:Certified\s+purity|Purity):\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
         "lot_number": r"Lot\s+(?:number|No\.?):\s*([A-Za-z0-9\-\/]+)",
-        "cas_number": r"CAS\s+No\.?:\s*(?:\[?)([0-9\-]+)",
+        "cas_number": r"CAS\s+No\.?:\s*(?:\[?)([0-9\-]+)"
     }
 
     for key, pattern in patterns.items():
@@ -157,19 +148,10 @@ def send_to_alchemy():
             }
         ]
 
-        response = requests.post(ALCHEMY_API_URL, headers=headers, json=payload)
+        response = requests.put(ALCHEMY_UPDATE_URL, headers=headers, json=payload)
         response.raise_for_status()
         
-        # Extract record ID if available
-        record_id = response.json()[0].get("id") if response.json() else None
-        record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/{record_id}" if record_id else None
-
-        return jsonify({
-            "status": "success",
-            "message": "Data sent successfully",
-            "record_id": record_id,
-            "record_url": record_url
-        })
+        return jsonify({"status": "success", "message": "Alchemy record updated", "data": response.json()})
     except requests.exceptions.RequestException as e:
         logging.error(f"Error sending to Alchemy: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500

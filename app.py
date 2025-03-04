@@ -758,7 +758,7 @@ def send_to_alchemy():
         alchemy_payload = [
             {
                 "processId": None,
-                "recordTemplate": "exampleParsing",
+                "recordTemplate": "example Parsing",
                 "properties": [
                     {
                         "identifier": "RecordName",

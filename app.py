@@ -491,11 +491,11 @@ def extract():
             except Exception as e:
                 logging.warning(f"Failed to remove temp file: {e}")
             
-           # Parse data with regex
-parsing_start = time.time()
-logging.info("Parsing extracted text")
-data = parse_data(text)  # Make sure this matches your function name
-logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
+            # Parse data with regex
+            parsing_start = time.time()
+            logging.info("Parsing extracted text")
+            data = parse_data(text)
+            logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
             
             # Add the full text
             data['full_text'] = text

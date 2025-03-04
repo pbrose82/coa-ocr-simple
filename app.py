@@ -98,6 +98,7 @@ HTML_TEMPLATE = '''
     </style>
 </head>
 <body>
+<img src="/mnt/data/Alchemy.png" alt="Alchemy Logo" style="position: absolute; left: 10px; top: 10px; height: 50px;">
     <div class="container">
         <h1 class="text-center mb-4">COA OCR to Alchemy</h1>
         
@@ -185,6 +186,7 @@ HTML_TEMPLATE = '''
                     No need to manually enter API Key - it's handled automatically.
                 </div>
                 <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
+<!-- Moved above -->
                 
                 <div id="apiResponse" class="mt-3" style="display: none;">
                     <h5>API Response:</h5>

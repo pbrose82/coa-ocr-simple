@@ -36,411 +36,66 @@ alchemy_token_cache = {
 
 # HTML template - your existing template
 HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>COA OCR Extractor</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { 
-            padding-top: 20px; 
-            padding-bottom: 40px;
-        }
-        .container {
-            max-width: 800px;
-        }
-        .result-box {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 5px;
-            background-color: #f8f9fa;
-        }
-        pre {
-            background-color: #f1f1f1;
-            padding: 10px;
-            border-radius: 4px;
-            overflow-x: auto;
-        }
-        .loader {
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 2s linear infinite;
-            margin: 20px auto;
-            display: none;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .api-settings {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .processing-status {
-            display: none;
-            margin-top: 15px;
-            padding: 10px;
-        }
-        .file-type-toggle {
-            margin-bottom: 15px;
-        }
-        .record-link {
-            margin-top: 10px;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-<img src="/mnt/data/Alchemy.png" alt="Alchemy Logo" style="position: absolute; left: 10px; top: 10px; height: 50px;">
-    <div class="container">
-        <h1 class="text-center mb-4">COA OCR to Alchemy</h1>
-        
-        <div class="alert alert-info">
-            <strong>Tips for best results:</strong>
-            <ul class="mb-0">
-                <li>Image files (JPG, PNG) process faster than PDFs</li>
-                <li>PDFs with embedded text work best</li>
-                <li>Use clear, high-resolution images of your COA documents</li>
-            </ul>
-        </div>
-        
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">Upload COA Document</h5>
-            </div>
-            <div class="card-body">
-                <div class="file-type-toggle">
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image" >
-                        <label class="form-check-label" for="imageOption">Image (faster)</label>
-                    </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf" checked>
-                        <label class="form-check-label" for="pdfOption">PDF</label>
-                    </div>
-                </div>
-                
-                <form id="uploadForm" enctype="multipart/form-data" class="mb-3">
-                    <div class="mb-3">
-                        <label for="file" class="form-label">Select COA file</label>
-                        <input class="form-control" type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
-                        <div class="form-text text-muted" id="fileTypeHelp">
-                            Images process faster. Select file type above to change accepted formats.
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Extract Data</button>
-                </form>
-                
-                <div id="processingStatus" class="alert alert-info processing-status">
-                    <div class="d-flex align-items-center">
-                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                        <span id="statusText">Processing your document...</span>
-                    </div>
-                    <div class="progress mt-2" style="height: 5px;">
-                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
-                    </div>
-                </div>
-                
-                <div id="alchemyAlerts" class="mt-3" style="display: none;">
-                    <div class="alert alert-success" id="successAlert" style="display: none;">
-                        <div>Data successfully sent to Alchemy!</div>
-                        <div class="record-link">
-                            <a href="#" id="recordLink" target="_blank">View record in Alchemy</a>
-                        </div>
-                    </div>
-                    <div class="alert alert-danger" id="errorAlert" style="display: none;">
-                        <span id="errorMessage">Error sending data to Alchemy</span>
-                    </div>
-                </div>
-                
-                <div id="results" class="result-box" style="display: none;">
-                    <h5>Extracted Data:</h5>
-                    <table class="table table-bordered">
-                        <tbody id="dataTable">
-                            <!-- Data will be inserted here -->
-                        </tbody>
-                    </table>
-                    
-                    <div class="mt-4">
-                        <h5>Raw Text:</h5>
-                        <pre id="rawText" style="max-height: 200px; overflow-y: auto;"></pre>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="api-settings mt-4 card">
-            <div class="card-header">
-                <h5 class="mb-0">Alchemy API Settings</h5>
-            </div>
-            <div class="card-body">
-                <div class="alert alert-success">
-                    <strong>Authentication Upgrade!</strong> This app now supports Refresh Token authentication.
-                    No need to manually enter API Key - it's handled automatically.
-                </div>
-                <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
-<!-- Moved above -->
-                
-                <div id="apiResponse" class="mt-3" style="display: none;">
-                    <h5>API Response:</h5>
-                    <pre id="responseText"></pre>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const uploadForm = document.getElementById('uploadForm');
-            const fileInput = document.getElementById('file');
-            const results = document.getElementById('results');
-            const dataTable = document.getElementById('dataTable');
-            const rawText = document.getElementById('rawText');
-            const sendToAlchemy = document.getElementById('sendToAlchemy');
-            const apiResponse = document.getElementById('apiResponse');
-            const responseText = document.getElementById('responseText');
-            const processingStatus = document.getElementById('processingStatus');
-            const statusText = document.getElementById('statusText');
-            const progressBar = document.getElementById('progressBar');
-            const imageOption = document.getElementById('imageOption');
-            const pdfOption = document.getElementById('pdfOption');
-            const alchemyAlerts = document.getElementById('alchemyAlerts');
-            const successAlert = document.getElementById('successAlert');
-            const errorAlert = document.getElementById('errorAlert');
-            const errorMessage = document.getElementById('errorMessage');
-            const recordLink = document.getElementById('recordLink');
-            
-            // Set file input accept attribute based on file type selection
-            imageOption.addEventListener('change', () => {
-                if (imageOption.checked) {
-                    fileInput.accept = ".jpg,.jpeg,.png,.tiff";
-                }
-            });
-            
-            pdfOption.addEventListener('change', () => {
-                if (pdfOption.checked) {
-                    fileInput.accept = ".pdf";
-                }
-            });
-            
-            let extractedData = null;
-            let processingTimeout;
-            
-            uploadForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                const file = fileInput.files[0];
-                
-                if (!file) {
-                    alert('Please select a file');
-                    return;
-                }
-                
-                // Check if file type matches selected option
-                const isPdf = file.name.toLowerCase().endsWith('.pdf');
-                const isImage = !isPdf;
-                
-                if ((imageOption.checked && isPdf) || (pdfOption.checked && isImage)) {
-                    const expectedType = imageOption.checked ? "image" : "PDF";
-                    alert(`You selected ${expectedType} file type but uploaded a ${isPdf ? "PDF" : "image"} file. Please select the correct file type or change your selection.`);
-                    return;
-                }
-                
-                // Clear previous results
-                dataTable.innerHTML = '';
-                rawText.textContent = '';
-                results.style.display = 'none';
-                sendToAlchemy.disabled = true;
-                apiResponse.style.display = 'none';
-                alchemyAlerts.style.display = 'none';
-                extractedData = null;
-                
-                // Show processing status
-                processingStatus.style.display = 'block';
-                statusText.textContent = 'Uploading document...';
-                progressBar.style.width = '10%';
-                
-                // Clear any existing timeout
-                if (processingTimeout) clearTimeout(processingTimeout);
-                
-                // Set up simulated progress for user feedback
-                let progress = 10;
-                const progressInterval = setInterval(() => {
-                    if (progress < 90) {
-                        progress += Math.random() * 5;
-                        progressBar.style.width = `${progress}%`;
-                        
-                        // Update status text based on progress
-                        if (progress > 20 && progress < 40) {
-                            statusText.textContent = 'Processing document...';
-                        } else if (progress > 40 && progress < 60) {
-                            statusText.textContent = 'Extracting text...';
-                        } else if (progress > 60 && progress < 80) {
-                            statusText.textContent = 'Analyzing data...';
-                        }
-                    }
-                }, 1000);
-                
-                // Set timeout to show warning after 30 seconds
-                processingTimeout = setTimeout(() => {
-                    statusText.textContent = 'Still processing... Please wait';
-                }, 30000);
-                
-                const formData = new FormData();
-                formData.append('file', file);
-                
-                fetch('/extract', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! Status: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Clear intervals and timeouts
-                    clearInterval(progressInterval);
-                    if (processingTimeout) clearTimeout(processingTimeout);
-                    
-                    // Complete progress bar
-                    progressBar.style.width = '100%';
-                    statusText.textContent = 'Processing complete!';
-                    
-                    // Hide processing indicators after a brief delay
-                    setTimeout(() => {
-                        processingStatus.style.display = 'none';
-                    }, 1000);
-                    
-                    if (data.error) {
-                        alert('Error: ' + data.error);
-                        return;
-                    }
-                    
-                    // Save extracted data
-                    extractedData = data;
-                    
-                    // Display results
-                    results.style.display = 'block';
-                    
-                    // Display extracted data in table
-                    for (const [key, value] of Object.entries(data)) {
-                        if (key !== 'full_text') {
-                            const row = document.createElement('tr');
-                            row.innerHTML = `
-                                <td><strong>${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}</strong></td>
-                                <td>${value}</td>
-                            `;
-                            dataTable.appendChild(row);
-                        }
-                    }
-                    
-                    // Display raw text
-                    rawText.textContent = data.full_text;
-                    
-                    // Enable send to Alchemy button if we have data to send
-                    if (data.product_name || data.purity) {
-                        sendToAlchemy.disabled = false;
-                    }
-                })
-                .catch(error => {
-                    // Clear intervals and timeouts
-                    clearInterval(progressInterval);
-                    if (processingTimeout) clearTimeout(processingTimeout);
-                    
-                    // Hide processing indicators
-                    processingStatus.style.display = 'none';
-                    
-                    console.error('Error:', error);
-                    alert('Error processing file. The server might have timed out. For PDFs, try using a smaller file or converting it to an image first.');
-                });
-            });
-            
-            sendToAlchemy.addEventListener('click', function() {
-                if (!extractedData) {
-                    alert('No data to send to Alchemy');
-                    return;
-                }
-                
-                // Show processing status
-                processingStatus.style.display = 'block';
-                statusText.textContent = 'Sending data to Alchemy...';
-                progressBar.style.width = '50%';
-                
-                // Hide previous alerts
-                alchemyAlerts.style.display = 'none';
-                successAlert.style.display = 'none';
-                errorAlert.style.display = 'none';
-                
-                // Format data for Alchemy's expected structure
-                const payload = {
-                    data: extractedData
-                };
-                
-                fetch('/send-to-alchemy', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                })
-                .then(response => response.json())
-                .then(data => {
-                    // Hide processing status
-                    processingStatus.style.display = 'none';
-                    
-                    // Show API response
-                    apiResponse.style.display = 'block';
-                    responseText.textContent = JSON.stringify(data, null, 2);
-                    
-                    // Show appropriate alert
-                    alchemyAlerts.style.display = 'block';
-                    if (data.status === 'success') {
-                        successAlert.style.display = 'block';
-                        errorAlert.style.display = 'none';
-                        
-                        // Set record link if available
-                        if (data.record_url) {
-                            recordLink.href = data.record_url;
-                            recordLink.textContent = `View record ${data.record_id} in Alchemy`;
-                        } else {
-                            recordLink.style.display = 'none';
-                        }
-                    } else {
-                        successAlert.style.display = 'none';
-                        errorAlert.style.display = 'block';
-                        errorMessage.textContent = data.message || 'Error sending data to Alchemy';
-                    }
-                })
-                .catch(error => {
-                    // Hide processing status
-                    processingStatus.style.display = 'none';
-                    console.error('Error:', error);
-                    
-                    // Show error alert
-                    alchemyAlerts.style.display = 'block';
-                    successAlert.style.display = 'none';
-                    errorAlert.style.display = 'block';
-                    errorMessage.textContent = error.message || 'Failed to send data to Alchemy';
-                    
-                    // Show response area with error
-                    apiResponse.style.display = 'block';
-                    responseText.textContent = `Error: ${error.message}`;
-                });
-            });
-        });
-    </script>
-</body>
-</html>
-'''
+<p>&nbsp;</p>
+<p>COA OCR Extractor<img style="position: absolute; left: 10px; top: 10px; height: 50px;" src="/mnt/data/Alchemy.png" alt="Alchemy Logo" /></p>
+<div class="container">
+<h1 class="text-center mb-4">COA OCR to Alchemy</h1>
+<div class="alert alert-info"><strong>Tips for best results:</strong>
+<ul class="mb-0">
+<li>Image files (JPG, PNG) process faster than PDFs</li>
+<li>PDFs with embedded text work best</li>
+<li>Use clear, high-resolution images of your COA documents</li>
+</ul>
+</div>
+<div class="card">
+<div class="card-header">
+<h5 class="card-title mb-0">Upload COA Document</h5>
+</div>
+<div class="card-body">
+<div class="file-type-toggle">
+<div class="form-check form-check-inline"><input id="imageOption" class="form-check-input" name="fileTypeOptions" type="radio" value="image" /> <label class="form-check-label" for="imageOption">Image (faster)</label></div>
+<div class="form-check form-check-inline"><input id="pdfOption" class="form-check-input" checked="checked" name="fileTypeOptions" type="radio" value="pdf" /> <label class="form-check-label" for="pdfOption">PDF</label></div>
+</div>
+<form id="uploadForm" class="mb-3" enctype="multipart/form-data">
+<div class="mb-3"><label class="form-label" for="file">Select COA file</label> <input id="file" class="form-control" accept=".jpg,.jpeg,.png,.pdf,.tiff" name="file" type="file" />
+<div id="fileTypeHelp" class="form-text text-muted">Images process faster. Select file type above to change accepted formats.</div>
+</div>
+<button class="btn btn-primary" type="submit">Extract Data</button></form>
+<div id="processingStatus" class="alert alert-info processing-status">
+<div class="d-flex align-items-center">
+<div class="spinner-border spinner-border-sm me-2">&nbsp;</div>
+<span id="statusText">Processing your document...</span></div>
+<div class="progress mt-2" style="height: 5px;">&nbsp;</div>
+</div>
+<div id="alchemyAlerts" class="mt-3" style="display: none;">
+<div id="successAlert" class="alert alert-success" style="display: none;">
+<div>Data successfully sent to Alchemy!</div>
+<div class="record-link">
+    <a id="recordLink" href="https://app.alchemy.cloud/productcaseelnlims4uat/record/{record_id}" target="_blank">
+        View record in Alchemy
+    </a>
+</div>
+</div>
+<div id="errorAlert" class="alert alert-danger" style="display: none;"><span id="errorMessage">Error sending data to Alchemy</span></div>
+</div>
+<div id="results" class="result-box" style="display: none;">
+<h5>Extracted Data:</h5>
+<table class="table table-bordered">
+<tbody id="dataTable"><!-- Data will be inserted here --></tbody>
+</table>
+<div class="mt-4">
+<h5>Raw Text:</h5>
+<pre id="rawText" style="max-height: 200px; overflow-y: auto;">&nbsp;</pre>
+</div>
+</div>
+
+<!-- "Send to Alchemy" button moved up -->
+<button id="sendToAlchemy" class="btn btn-success" disabled="disabled">Send to Alchemy</button>
+
+</div>
+</div>
+</div>
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS

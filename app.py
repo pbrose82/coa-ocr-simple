@@ -34,7 +34,8 @@ alchemy_token_cache = {
     "expires_at": 0  # Unix timestamp when the token expires
 }
 
-HTML_TEMPLATE = f'''
+# HTML template with updated UI
+HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -43,52 +44,52 @@ HTML_TEMPLATE = f'''
     <title>COA OCR Extractor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {{ 
+        body { 
             padding-top: 20px; 
             padding-bottom: 40px;
-        }}
-        .container {{
+        }
+        .container {
             max-width: 800px;
-        }}
-        .result-box {{
+        }
+        .result-box {
             margin-top: 20px;
             padding: 15px;
             border-radius: 5px;
             background-color: #f8f9fa;
-        }}
-        pre {{
+        }
+        pre {
             background-color: #f1f1f1;
             padding: 10px;
             border-radius: 4px;
             overflow-x: auto;
-        }}
-        .processing-status {{
+        }
+        .processing-status {
             display: none;
             margin-top: 15px;
             padding: 10px;
-        }}
-        .file-type-toggle {{
+        }
+        .file-type-toggle {
             margin-bottom: 15px;
-        }}
-        .record-link {{
+        }
+        .record-link {
             margin-top: 10px;
             font-weight: bold;
-        }}
-        .logo {{
+        }
+        .logo {
             max-height: 60px;
             margin-right: 15px;
-        }}
-        .header {{
+        }
+        .header {
             display: flex;
             align-items: center;
             margin-bottom: 20px;
-        }}
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <img src="data:image/png;base64,{ALCHEMY_LOGO_BASE64}" alt="Alchemy Logo" class="logo">
+            
             <h1 class="mb-0">COA OCR to Alchemy</h1>
         </div>
         
@@ -171,7 +172,7 @@ HTML_TEMPLATE = f'''
     </div>
     
     <script>
-        document.addEventListener('DOMContentLoaded', function() {{
+        document.addEventListener('DOMContentLoaded', function() {
             const uploadForm = document.getElementById('uploadForm');
             const fileInput = document.getElementById('file');
             const results = document.getElementById('results');
@@ -190,40 +191,40 @@ HTML_TEMPLATE = f'''
             const recordLink = document.getElementById('recordLink');
             
             // Set file input accept attribute based on file type selection
-            imageOption.addEventListener('change', () => {{
-                if (imageOption.checked) {{
+            imageOption.addEventListener('change', () => {
+                if (imageOption.checked) {
                     fileInput.accept = ".jpg,.jpeg,.png,.tiff";
-                }}
-            }});
+                }
+            });
             
-            pdfOption.addEventListener('change', () => {{
-                if (pdfOption.checked) {{
+            pdfOption.addEventListener('change', () => {
+                if (pdfOption.checked) {
                     fileInput.accept = ".pdf";
-                }}
-            }});
+                }
+            });
             
             let extractedData = null;
             let processingTimeout;
             
-            uploadForm.addEventListener('submit', function(e) {{
+            uploadForm.addEventListener('submit', function(e) {
                 e.preventDefault();
                 
                 const file = fileInput.files[0];
                 
-                if (!file) {{
+                if (!file) {
                     alert('Please select a file');
                     return;
-                }}
+                }
                 
                 // Check if file type matches selected option
                 const isPdf = file.name.toLowerCase().endsWith('.pdf');
                 const isImage = !isPdf;
                 
-                if ((imageOption.checked && isPdf) || (pdfOption.checked && isImage)) {{
+                if ((imageOption.checked && isPdf) || (pdfOption.checked && isImage)) {
                     const expectedType = imageOption.checked ? "image" : "PDF";
-                    alert(`You selected ${{expectedType}} file type but uploaded a ${{isPdf ? "PDF" : "image"}} file. Please select the correct file type or change your selection.`);
+                    alert(`You selected ${expectedType} file type but uploaded a ${isPdf ? "PDF" : "image"} file. Please select the correct file type or change your selection.`);
                     return;
-                }}
+                }
                 
                 // Clear previous results
                 dataTable.innerHTML = '';
@@ -243,41 +244,41 @@ HTML_TEMPLATE = f'''
                 
                 // Set up simulated progress for user feedback
                 let progress = 10;
-                const progressInterval = setInterval(() => {{
-                    if (progress < 90) {{
+                const progressInterval = setInterval(() => {
+                    if (progress < 90) {
                         progress += Math.random() * 5;
-                        progressBar.style.width = `${{progress}}%`;
+                        progressBar.style.width = `${progress}%`;
                         
                         // Update status text based on progress
-                        if (progress > 20 && progress < 40) {{
+                        if (progress > 20 && progress < 40) {
                             statusText.textContent = 'Processing document...';
-                        }} else if (progress > 40 && progress < 60) {{
+                        } else if (progress > 40 && progress < 60) {
                             statusText.textContent = 'Extracting text...';
-                        }} else if (progress > 60 && progress < 80) {{
+                        } else if (progress > 60 && progress < 80) {
                             statusText.textContent = 'Analyzing data...';
-                        }}
-                    }}
-                }}, 1000);
+                        }
+                    }
+                }, 1000);
                 
                 // Set timeout to show warning after 30 seconds
-                processingTimeout = setTimeout(() => {{
+                processingTimeout = setTimeout(() => {
                     statusText.textContent = 'Still processing... Please wait';
-                }}, 30000);
+                }, 30000);
                 
                 const formData = new FormData();
                 formData.append('file', file);
                 
-                fetch('/extract', {{
+                fetch('/extract', {
                     method: 'POST',
                     body: formData
-                }})
-                .then(response => {{
-                    if (!response.ok) {{
-                        throw new Error(`HTTP error! Status: ${{response.status}}`);
-                    }}
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
                     return response.json();
-                }})
-                .then(data => {{
+                })
+                .then(data => {
                     // Clear intervals and timeouts
                     clearInterval(progressInterval);
                     if (processingTimeout) clearTimeout(processingTimeout);
@@ -287,14 +288,14 @@ HTML_TEMPLATE = f'''
                     statusText.textContent = 'Processing complete!';
                     
                     // Hide processing indicators after a brief delay
-                    setTimeout(() => {{
+                    setTimeout(() => {
                         processingStatus.style.display = 'none';
-                    }}, 1000);
+                    }, 1000);
                     
-                    if (data.error) {{
+                    if (data.error) {
                         alert('Error: ' + data.error);
                         return;
-                    }}
+                    }
                     
                     // Save extracted data
                     extractedData = data;
@@ -303,26 +304,26 @@ HTML_TEMPLATE = f'''
                     results.style.display = 'block';
                     
                     // Display extracted data in table
-                    for (const [key, value] of Object.entries(data)) {{
-                        if (key !== 'full_text') {{
+                    for (const [key, value] of Object.entries(data)) {
+                        if (key !== 'full_text') {
                             const row = document.createElement('tr');
                             row.innerHTML = `
-                                <td><strong>${{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}}</strong></td>
-                                <td>${{value}}</td>
+                                <td><strong>${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}</strong></td>
+                                <td>${value}</td>
                             `;
                             dataTable.appendChild(row);
-                        }}
-                    }}
+                        }
+                    }
                     
                     // Display raw text
                     rawText.textContent = data.full_text;
                     
                     // Enable send to Alchemy button if we have data to send
-                    if (data.product_name || data.purity) {{
+                    if (data.product_name || data.purity) {
                         sendToAlchemy.disabled = false;
-                    }}
-                }})
-                .catch(error => {{
+                    }
+                })
+                .catch(error => {
                     // Clear intervals and timeouts
                     clearInterval(progressInterval);
                     if (processingTimeout) clearTimeout(processingTimeout);
@@ -332,14 +333,14 @@ HTML_TEMPLATE = f'''
                     
                     console.error('Error:', error);
                     alert('Error processing file. The server might have timed out. For PDFs, try using a smaller file or converting it to an image first.');
-                }});
-            }});
+                });
+            });
             
-            sendToAlchemy.addEventListener('click', function() {{
-                if (!extractedData) {{
+            sendToAlchemy.addEventListener('click', function() {
+                if (!extractedData) {
                     alert('No data to send to Alchemy');
                     return;
-                }}
+                }
                 
                 // Show processing status
                 processingStatus.style.display = 'block';
@@ -352,42 +353,42 @@ HTML_TEMPLATE = f'''
                 errorAlert.style.display = 'none';
                 
                 // Format data for Alchemy's expected structure
-                const payload = {{
+                const payload = {
                     data: extractedData
-                }};
+                };
                 
-                fetch('/send-to-alchemy', {{
+                fetch('/send-to-alchemy', {
                     method: 'POST',
-                    headers: {{
+                    headers: {
                         'Content-Type': 'application/json'
-                    }},
+                    },
                     body: JSON.stringify(payload)
-                }})
+                })
                 .then(response => response.json())
-                .then(data => {{
+                .then(data => {
                     // Hide processing status
                     processingStatus.style.display = 'none';
                     
                     // Show appropriate alert
                     alchemyAlerts.style.display = 'block';
-                    if (data.status === 'success') {{
+                    if (data.status === 'success') {
                         successAlert.style.display = 'block';
                         errorAlert.style.display = 'none';
                         
                         // Set record link if available
-                        if (data.record_url) {{
+                        if (data.record_url) {
                             recordLink.href = data.record_url;
-                            recordLink.textContent = `View record ${{data.record_id}} in Alchemy`;
-                        }} else {{
+                            recordLink.textContent = `View record ${data.record_id} in Alchemy`;
+                        } else {
                             recordLink.style.display = 'none';
-                        }}
-                    }} else {{
+                        }
+                    } else {
                         successAlert.style.display = 'none';
                         errorAlert.style.display = 'block';
                         errorMessage.textContent = data.message || 'Error sending data to Alchemy';
-                    }}
-                }})
-                .catch(error => {{
+                    }
+                })
+                .catch(error => {
                     // Hide processing status
                     processingStatus.style.display = 'none';
                     console.error('Error:', error);
@@ -397,9 +398,9 @@ HTML_TEMPLATE = f'''
                     successAlert.style.display = 'none';
                     errorAlert.style.display = 'block';
                     errorMessage.textContent = error.message || 'Failed to send data to Alchemy';
-                }});
-            }});
-        }});
+                });
+            });
+        });
     </script>
 </body>
 </html>

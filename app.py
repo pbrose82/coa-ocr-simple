@@ -739,12 +739,12 @@ def send_to_alchemy():
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
     
-    # Get token
+    # Get a valid token
     token = get_auth_token()
     if not token:
         return jsonify({
             "status": "error", 
-            "message": "No authentication token available"
+            "message": "Failed to get valid authentication token"
         }), 401
     
     try:
@@ -754,16 +754,71 @@ def send_to_alchemy():
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))
         
-        # Let's try a simpler approach - post directly to the endpoint
-        create_record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/create-record"
-        
-        # Try a simpler payload structure without specifying a template
-        alchemy_payload = {
-            "RecordName": extracted_data.get('product_name', "Unknown Product"),
-            "CasNumber": extracted_data.get('cas_number', ""),
-            "Purity": purity_value,
-            "LotNumber": extracted_data.get('lot_number', "")
-        }
+        # Format data for Alchemy API - exactly matching the Postman structure
+        alchemy_payload = [
+            {
+                "processId": None,
+                "recordTemplate": "exampleParsing",
+                "properties": [
+                    {
+                        "identifier": "RecordName",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "CasNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('cas_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "Purity",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": purity_value,
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "LotNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('lot_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
         
         # Send to Alchemy API using the token
         headers = {
@@ -771,9 +826,21 @@ def send_to_alchemy():
             "Content-Type": "application/json"
         }
         
+        # Construct the API URL
+        create_record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/create-record"
+        
         logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
-        logging.info(f"URL: {create_record_url}")
         response = requests.post(create_record_url, headers=headers, json=alchemy_payload)
+        
+        # Handle unauthorized response by refreshing token once
+        if response.status_code == 401:
+            logging.info("Token expired, refreshing and retrying")
+            # Force token refresh
+            with TOKEN_LOCK:
+                if refresh_alchemy_token():
+                    token = ALCHEMY_ACCESS_TOKEN
+                    headers["Authorization"] = f"Bearer {token}"
+                    response = requests.post(create_record_url, headers=headers, json=alchemy_payload)
         
         # Log response for debugging
         logging.info(f"Alchemy API response status code: {response.status_code}")
@@ -782,23 +849,37 @@ def send_to_alchemy():
         # Check if the request was successful
         response.raise_for_status()
         
-        # Extract record ID and build URL
+        # Try to extract the record ID from the response
         record_id = None
         record_url = None
         try:
             response_data = response.json()
-            if isinstance(response_data, dict):
+            # Extract record ID from response - adjust this based on actual response structure
+            if isinstance(response_data, list) and len(response_data) > 0:
+                if 'id' in response_data[0]:
+                    record_id = response_data[0]['id']
+                elif 'recordId' in response_data[0]:
+                    record_id = response_data[0]['recordId']
+            elif isinstance(response_data, dict):
                 if 'id' in response_data:
                     record_id = response_data['id']
                 elif 'recordId' in response_data:
                     record_id = response_data['recordId']
+                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                    if 'id' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['id']
+                    elif 'recordId' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['recordId']
             
+            # If record ID was found, construct the URL
             if record_id:
                 record_url = f"{ALCHEMY_RECORD_URL.rstrip('/')}/{record_id}"
                 logging.info(f"Created record URL: {record_url}")
+            
         except Exception as e:
             logging.warning(f"Could not extract record ID from response: {e}")
         
+        # Return success response with record URL if available
         return jsonify({
             "status": "success", 
             "message": "Data successfully sent to Alchemy",
@@ -809,6 +890,8 @@ def send_to_alchemy():
         
     except requests.exceptions.RequestException as e:
         logging.error(f"Request error sending to Alchemy: {e}")
+        
+        # Try to capture response content if available
         error_response = None
         if hasattr(e, 'response') and e.response:
             try:
@@ -828,7 +911,7 @@ def send_to_alchemy():
             "status": "error", 
             "message": str(e)
         }), 500
-        
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)

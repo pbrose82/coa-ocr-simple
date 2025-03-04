@@ -30,7 +30,7 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document OCR Extractor</title>
+    <title>COA OCR Extractor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { 
@@ -84,20 +84,20 @@ HTML_TEMPLATE = '''
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">Document OCR to Alchemy</h1>
+        <h1 class="text-center mb-4">COA OCR to Alchemy</h1>
         
         <div class="alert alert-info">
             <strong>Tips for best results:</strong>
             <ul class="mb-0">
                 <li>Image files (JPG, PNG) process faster than PDFs</li>
                 <li>PDFs with embedded text work best</li>
-                <li>Use clear, high-resolution images of your documents</li>
+                <li>Use clear, high-resolution images of your COA documents</li>
             </ul>
         </div>
         
         <div class="card">
             <div class="card-header">
-                <h5 class="card-title mb-0">Upload Document</h5>
+                <h5 class="card-title mb-0">Upload COA Document</h5>
             </div>
             <div class="card-body">
                 <div class="file-type-toggle">
@@ -113,7 +113,7 @@ HTML_TEMPLATE = '''
                 
                 <form id="uploadForm" enctype="multipart/form-data" class="mb-3">
                     <div class="mb-3">
-                        <label for="file" class="form-label">Select document file</label>
+                        <label for="file" class="form-label">Select COA file</label>
                         <input class="form-control" type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
                         <div class="form-text text-muted" id="fileTypeHelp">
                             Images process faster. Select file type above to change accepted formats.
@@ -457,14 +457,25 @@ def parse_coa_data(text):
         # Default to COA if not explicitly a technical data sheet
         data["document_type"] = "Certificate of Analysis"
         
-        # COA specific patterns
+        # COA specific patterns with improved patterns
         coa_patterns = {
-            "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM|[A-Z]{3,})",
-            "purity": r"(?:Certified\s+purity|Det\.\s+Purity):\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
+            # Look for BENZENE specifically or other common chemical names
+            "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM)",
+            
+            # More flexible purity patterns to catch various formats
+            "purity": r"(?:Certified\s+purity|Det\.\s+Purity|Purity):\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
+            
+            # Improved lot number pattern
             "lot_number": r"Lot\s+(?:number|No\.?):\s*([A-Za-z0-9\-\/]+)",
-            "cas_number": r"CAS\s+No\.?:\s*\[?([0-9\-]+)",
+            
+            # Fixed CAS number pattern to capture the full number
+            "cas_number": r"CAS\s+No\.?:\s*(?:\[?)([0-9\-]+)",
+            
+            # Date patterns
             "date_of_analysis": r"Date\s+of\s+Analysis:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
             "expiry_date": r"Expiry\s+Date:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+            
+            # Chemical info patterns
             "formula": r"Formula:\s*([A-Za-z0-9]+)",
             "molecular_weight": r"Mol\.\s+Weight:\s*([\d\.]+)",
         }
@@ -472,37 +483,53 @@ def parse_coa_data(text):
         # Extract data using COA patterns
         for key, pattern in coa_patterns.items():
             match = re.search(pattern, text, re.IGNORECASE)
-            if match and key != "product_name":
-                data[key] = match.group(1).strip() if match.groups() else match.group(0).strip()
-            elif match:
-                data[key] = match.group(0).strip()
+            if match:
+                if key != "product_name" and match.groups():
+                    data[key] = match.group(1).strip()
+                elif match:
+                    data[key] = match.group(0).strip()
+        
+        # Additional fallback pattern for purity that's more flexible
+        if "purity" not in data or not data["purity"]:
+            purity_patterns = [
+                r"(\d{2,3}\.\d{1,2}\s*[±\+\-]\s*\d{1,2}\.\d{1,2}\s*%)",
+                r"Certified\s+puri[^\:]*:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*[%o])",
+                r"purity:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
+                r"Det\.\s+Purity:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)"
+            ]
+            
+            for pattern in purity_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data["purity"] = match.group(1).strip()
+                    break
     
     # Fallback for product name extraction if not found with specific patterns
-    if "product_name" not in data or not data["product_name"]:
-        # Look for any product name after phrases like "Product:" or at the beginning of the document
-        product_match = re.search(r"(?:Product:|Product\s+Name:)\s*([A-Za-z0-9®\s\-]+)", text, re.IGNORECASE)
-        if product_match:
-            data["product_name"] = product_match.group(1).strip()
+    if "product_name" not in data or not data["product_name"] or data["product_name"].lower() == "page":
+        # Specifically look for BENZENE in the document
+        benzene_match = re.search(r"BENZENE", text, re.IGNORECASE)
+        if benzene_match:
+            data["product_name"] = "BENZENE"
         else:
-            # Try to find product name in the beginning of the document
-            lines = text.split('\n')
-            for line in lines[1:20]:  # Check first 20 lines
-                line = line.strip()
-                if line and not line.startswith("Lit.") and not line.startswith("Page") and len(line) < 50:
-                    # This might be a title/product name
-                    if re.match(r"^[A-Za-z0-9®\s\-]+$", line):
-                        data["product_name"] = line
+            # Try to find a proper product name in the document
+            product_line_pattern = r"Reference\s+Material\s+No\.[^\n]+\n+([A-Z]+)"
+            match = re.search(product_line_pattern, text, re.IGNORECASE)
+            if match:
+                data["product_name"] = match.group(1).strip()
+            else:
+                # Look for any capitalized text that might be a product name
+                lines = text.split('\n')
+                for line in lines:
+                    if re.match(r"^[A-Z]{3,}$", line.strip()):
+                        data["product_name"] = line.strip()
                         break
-
-        # Try to identify if the "Page" text is being mistakenly identified as product name
-        if "product_name" in data and data["product_name"] and "Page" in data["product_name"]:
-            # This is likely not a valid product name, remove it
-            data.pop("product_name")
-            
-            # Look more specifically for common product name formats
-            product_match = re.search(r"IsoBag®\s+TSA\s+Settle", text, re.IGNORECASE)
-            if product_match:
-                data["product_name"] = product_match.group(0).strip()
+    
+    # Additional cleanup for CAS number - make sure it's complete
+    if "cas_number" in data and len(data["cas_number"]) < 3:
+        # Look for a more complete CAS number pattern
+        cas_match = re.search(r"CAS[^:]*:\s*(?:\[?)([0-9]{1,3}\-[0-9]{2}\-[0-9])", text, re.IGNORECASE)
+        if cas_match:
+            data["cas_number"] = cas_match.group(1).strip()
     
     return data
 

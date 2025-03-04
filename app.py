@@ -13,7 +13,6 @@ from pdf2image import convert_from_path
 import PyPDF2
 import datetime
 import threading
-from functools import wraps
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -752,10 +751,10 @@ def extract():
             
             return jsonify(data)
             
-      except Exception as e:
+        except Exception as e:
             logging.error(f"Error processing file: {e}")
             # Clean up the file in case of error
-            if os.path.exists
+            if os.path.exists(filepath):
                 try:
                     os.remove(filepath)
                 except:
@@ -886,5 +885,3 @@ def send_to_alchemy():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
-   

@@ -490,12 +490,44 @@ def refresh_alchemy_token():
         logging.error(f"Error refreshing Alchemy token: {e}")
         return False
 
+def get_available_templates():
+    """Get available record templates from Alchemy"""
+    token = get_auth_token()
+    if not token:
+        logging.error("No auth token available")
+        return []
+    
+    try:
+        # Construct URL to get templates
+        templates_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/templates"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(templates_url, headers=headers)
+        response.raise_for_status()
+        
+        templates = response.json()
+        logging.info(f"Available templates: {json.dumps(templates)}")
+        return templates
+    except Exception as e:
+        logging.error(f"Error getting templates: {e}")
+        return []
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
+
+@app.route('/get-templates', methods=['GET'])
+def get_templates_route():
+    """Get available Alchemy templates"""
+    templates = get_available_templates()
+    return jsonify({"templates": templates})
 
 def extract_text_from_pdf_without_ocr(pdf_path):
     """Try to extract text directly from PDF without OCR"""
@@ -723,7 +755,7 @@ def extract():
         except Exception as e:
             logging.error(f"Error processing file: {e}")
             # Clean up the file in case of error
-            if os.path.exists(filepath):
+    if os.path.exists(filepath):
                 try:
                     os.remove(filepath)
                 except:
@@ -748,79 +780,26 @@ def send_to_alchemy():
         }), 401
     
     try:
+        # Try to get available templates
+        try:
+            # This is just for logging/debugging
+            get_available_templates()
+        except Exception as e:
+            logging.warning(f"Could not get templates: {e}")
+        
         # Extract the data received from the client
         extracted_data = data.get('data', {})
         
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))
         
-        # Format data for Alchemy API - exactly matching the Postman structure
-        alchemy_payload = [
-            {
-                "processId": None,
-                "properties": [
-                    {
-                        "identifier": "RecordName",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('product_name', "Unknown Product"),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "CasNumber",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('cas_number', ""),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "Purity",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": purity_value,
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "LotNumber",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('lot_number', ""),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                "recordTemplate": "exampleParsing"
-            }
-        ]
-        
-    
+        # Format data for Alchemy API - using simpler format without specifying template
+        alchemy_payload = {
+            "RecordName": extracted_data.get('product_name', "Unknown Product"),
+            "CasNumber": extracted_data.get('cas_number', ""),
+            "Purity": purity_value,
+            "LotNumber": extracted_data.get('lot_number', "")
+        }
         
         # Send to Alchemy API using the token
         headers = {
@@ -828,21 +807,11 @@ def send_to_alchemy():
             "Content-Type": "application/json"
         }
         
-        # Construct the API URL
-        create_record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/create-record"
+        # Construct the API URL - try a simpler endpoint
+        create_record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/records"
         
-        logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
+        logging.info(f"Sending simplified data to Alchemy: {json.dumps(alchemy_payload)}")
         response = requests.post(create_record_url, headers=headers, json=alchemy_payload)
-        
-        # Handle unauthorized response by refreshing token once
-        if response.status_code == 401:
-            logging.info("Token expired, refreshing and retrying")
-            # Force token refresh
-            with TOKEN_LOCK:
-                if refresh_alchemy_token():
-                    token = ALCHEMY_ACCESS_TOKEN
-                    headers["Authorization"] = f"Bearer {token}"
-                    response = requests.post(create_record_url, headers=headers, json=alchemy_payload)
         
         # Log response for debugging
         logging.info(f"Alchemy API response status code: {response.status_code}")
@@ -856,18 +825,18 @@ def send_to_alchemy():
         record_url = None
         try:
             response_data = response.json()
-            # Extract record ID from response - adjust this based on actual response structure
-            if isinstance(response_data, list) and len(response_data) > 0:
+            # Extract record ID from response (adjust based on actual response)
+            if 'id' in response_data:
+                record_id = response_data['id']
+            elif 'recordId' in response_data:
+                record_id = response_data['recordId']
+            elif isinstance(response_data, list) and len(response_data) > 0:
                 if 'id' in response_data[0]:
                     record_id = response_data[0]['id']
                 elif 'recordId' in response_data[0]:
                     record_id = response_data[0]['recordId']
             elif isinstance(response_data, dict):
-                if 'id' in response_data:
-                    record_id = response_data['id']
-                elif 'recordId' in response_data:
-                    record_id = response_data['recordId']
-                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                if 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
                     if 'id' in response_data['data'][0]:
                         record_id = response_data['data'][0]['id']
                     elif 'recordId' in response_data['data'][0]:

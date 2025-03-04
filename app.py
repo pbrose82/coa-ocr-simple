@@ -118,11 +118,11 @@ HTML_TEMPLATE = '''
             <div class="card-body">
                 <div class="file-type-toggle">
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image" checked>
+                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image" >
                         <label class="form-check-label" for="imageOption">Image (faster)</label>
                     </div>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf">
+                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf" checked>
                         <label class="form-check-label" for="pdfOption">PDF</label>
                     </div>
                 </div>

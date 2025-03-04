@@ -739,12 +739,12 @@ def send_to_alchemy():
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
     
-    # Get a valid token
+    # Get token from environment variables
     token = get_auth_token()
     if not token:
         return jsonify({
             "status": "error", 
-            "message": "Failed to get valid authentication token"
+            "message": "No authentication token available"
         }), 401
     
     try:
@@ -758,7 +758,6 @@ def send_to_alchemy():
         alchemy_payload = [
             {
                 "processId": None,
-                "recordTemplate": "OCRParsing",
                 "properties": [
                     {
                         "identifier": "RecordName",
@@ -816,9 +815,12 @@ def send_to_alchemy():
                             }
                         ]
                     }
-                ]
+                ],
+                "recordTemplate": "exampleParsing"
             }
         ]
+        
+    
         
         # Send to Alchemy API using the token
         headers = {

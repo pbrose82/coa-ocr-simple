@@ -10,6 +10,7 @@ import uuid
 import logging
 import time
 from pdf2image import convert_from_path
+import PyPDF2
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -76,23 +77,46 @@ HTML_TEMPLATE = '''
             margin-top: 15px;
             padding: 10px;
         }
+        .file-type-toggle {
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1 class="text-center mb-4">COA OCR to Alchemy</h1>
         
+        <div class="alert alert-info">
+            <strong>Tips for best results:</strong>
+            <ul class="mb-0">
+                <li>Image files (JPG, PNG) process faster than PDFs</li>
+                <li>PDFs with embedded text work best</li>
+                <li>Use clear, high-resolution images of your COA documents</li>
+            </ul>
+        </div>
+        
         <div class="card">
             <div class="card-header">
                 <h5 class="card-title mb-0">Upload COA Document</h5>
             </div>
             <div class="card-body">
+                <div class="file-type-toggle">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image" checked>
+                        <label class="form-check-label" for="imageOption">Image (faster)</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf">
+                        <label class="form-check-label" for="pdfOption">PDF</label>
+                    </div>
+                </div>
+                
                 <form id="uploadForm" enctype="multipart/form-data" class="mb-3">
                     <div class="mb-3">
-                        <label for="file" class="form-label">Select COA file (JPG, PNG, PDF, TIFF)</label>
+                        <label for="file" class="form-label">Select COA file</label>
                         <input class="form-control" type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
-                        <div class="form-text text-muted">
-                            PDFs may take longer to process. For faster results, consider uploading images.
+                        <div class="form-text text-muted" id="fileTypeHelp">
+                            Images process faster. Select file type above to change accepted formats.
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary">Extract Data</button>
@@ -107,8 +131,6 @@ HTML_TEMPLATE = '''
                         <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
                     </div>
                 </div>
-                
-                <div id="loader" class="loader"></div>
                 
                 <div id="results" class="result-box" style="display: none;">
                     <h5>Extracted Data:</h5>
@@ -148,7 +170,7 @@ HTML_TEMPLATE = '''
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const uploadForm = document.getElementById('uploadForm');
-            const loader = document.getElementById('loader');
+            const fileInput = document.getElementById('file');
             const results = document.getElementById('results');
             const dataTable = document.getElementById('dataTable');
             const rawText = document.getElementById('rawText');
@@ -160,6 +182,8 @@ HTML_TEMPLATE = '''
             const processingStatus = document.getElementById('processingStatus');
             const statusText = document.getElementById('statusText');
             const progressBar = document.getElementById('progressBar');
+            const imageOption = document.getElementById('imageOption');
+            const pdfOption = document.getElementById('pdfOption');
             
             // Load saved API settings from localStorage
             apiKey.value = localStorage.getItem('alchemyApiKey') || '';
@@ -174,17 +198,39 @@ HTML_TEMPLATE = '''
                 localStorage.setItem('alchemyApiUrl', apiUrl.value);
             });
             
+            // Set file input accept attribute based on file type selection
+            imageOption.addEventListener('change', () => {
+                if (imageOption.checked) {
+                    fileInput.accept = ".jpg,.jpeg,.png,.tiff";
+                }
+            });
+            
+            pdfOption.addEventListener('change', () => {
+                if (pdfOption.checked) {
+                    fileInput.accept = ".pdf";
+                }
+            });
+            
             let extractedData = null;
             let processingTimeout;
             
             uploadForm.addEventListener('submit', function(e) {
                 e.preventDefault();
                 
-                const fileInput = document.getElementById('file');
                 const file = fileInput.files[0];
                 
                 if (!file) {
                     alert('Please select a file');
+                    return;
+                }
+                
+                // Check if file type matches selected option
+                const isPdf = file.name.toLowerCase().endsWith('.pdf');
+                const isImage = !isPdf;
+                
+                if ((imageOption.checked && isPdf) || (pdfOption.checked && isImage)) {
+                    const expectedType = imageOption.checked ? "image" : "PDF";
+                    alert(`You selected ${expectedType} file type but uploaded a ${isPdf ? "PDF" : "image"} file. Please select the correct file type or change your selection.`);
                     return;
                 }
                 
@@ -193,6 +239,7 @@ HTML_TEMPLATE = '''
                 rawText.textContent = '';
                 results.style.display = 'none';
                 sendToAlchemy.disabled = true;
+                apiResponse.style.display = 'none';
                 extractedData = null;
                 
                 // Show processing status
@@ -207,23 +254,23 @@ HTML_TEMPLATE = '''
                 let progress = 10;
                 const progressInterval = setInterval(() => {
                     if (progress < 90) {
-                        progress += Math.random() * 10;
+                        progress += Math.random() * 5;
                         progressBar.style.width = `${progress}%`;
                         
                         // Update status text based on progress
                         if (progress > 20 && progress < 40) {
                             statusText.textContent = 'Processing document...';
                         } else if (progress > 40 && progress < 60) {
-                            statusText.textContent = 'Extracting text with OCR...';
+                            statusText.textContent = 'Extracting text...';
                         } else if (progress > 60 && progress < 80) {
                             statusText.textContent = 'Analyzing data...';
                         }
                     }
-                }, 2000);
+                }, 1000);
                 
                 // Set timeout to show warning after 30 seconds
                 processingTimeout = setTimeout(() => {
-                    statusText.textContent = 'Still processing... PDF files may take longer';
+                    statusText.textContent = 'Still processing... Please wait';
                 }, 30000);
                 
                 const formData = new FormData();
@@ -233,14 +280,25 @@ HTML_TEMPLATE = '''
                     method: 'POST',
                     body: formData
                 })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     // Clear intervals and timeouts
                     clearInterval(progressInterval);
                     if (processingTimeout) clearTimeout(processingTimeout);
                     
-                    // Hide processing indicators
-                    processingStatus.style.display = 'none';
+                    // Complete progress bar
+                    progressBar.style.width = '100%';
+                    statusText.textContent = 'Processing complete!';
+                    
+                    // Hide processing indicators after a brief delay
+                    setTimeout(() => {
+                        processingStatus.style.display = 'none';
+                    }, 1000);
                     
                     if (data.error) {
                         alert('Error: ' + data.error);
@@ -282,7 +340,7 @@ HTML_TEMPLATE = '''
                     processingStatus.style.display = 'none';
                     
                     console.error('Error:', error);
-                    alert('Error processing file. If you uploaded a PDF, it may be too large or complex. Try again with a smaller file or an image instead.');
+                    alert('Error processing file. The server might have timed out. For PDFs, try using a smaller file or converting it to an image first.');
                 });
             });
             
@@ -304,7 +362,9 @@ HTML_TEMPLATE = '''
                     lot_number: extractedData.lot_number || '',
                     cas_number: extractedData.cas_number || '',
                     date_of_analysis: extractedData.date_of_analysis || '',
-                    // Add more fields as needed
+                    expiry_date: extractedData.expiry_date || '',
+                    formula: extractedData.formula || '',
+                    molecular_weight: extractedData.molecular_weight || ''
                 };
                 
                 fetch(apiUrl.value, {
@@ -344,6 +404,25 @@ def allowed_file(filename):
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+def extract_text_from_pdf_without_ocr(pdf_path):
+    """Try to extract text directly from PDF without OCR"""
+    try:
+        text = ""
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            for page_num in range(min(2, len(reader.pages))):
+                page_text = reader.pages[page_num].extract_text() or ""
+                if page_text:
+                    text += f"--- Page {page_num+1} ---\n{page_text}\n\n"
+        
+        # If we got meaningful text (more than just a few characters)
+        if len(text.strip()) > 100:
+            return text
+        return None
+    except Exception as e:
+        logging.error(f"Error extracting text directly from PDF: {e}")
+        return None
+
 @app.route('/extract', methods=['POST'])
 def extract():
     # Check if the post request has the file part
@@ -371,42 +450,46 @@ def extract():
             file.save(filepath)
             logging.info(f"File saved at {filepath}")
             
-            # Process with OCR - handle different file types
+            # Process based on file type
             if filepath.lower().endswith('.pdf'):
                 logging.info("Processing PDF file")
-                # For PDFs, use pdf2image to convert to images first
                 
-                # Convert PDF to images with optimized settings
-                logging.info("Converting PDF to images")
-                images = convert_from_path(
-                    filepath,
-                    dpi=150,  # Lower DPI for faster processing 
-                    first_page=1,
-                    last_page=3,  # Only process up to 3 pages
-                    thread_count=2  # Use parallel processing
-                )
-                logging.info(f"Converted PDF to {len(images)} images in {time.time() - start_time:.2f} seconds")
+                # First try to extract text directly (for text-based PDFs)
+                text = extract_text_from_pdf_without_ocr(filepath)
                 
-                # OCR the pages
-                text = ""
-                for i, img in enumerate(images):
-                    page_start = time.time()
-                    logging.info(f"Processing page {i+1}")
+                if text:
+                    logging.info(f"Successfully extracted text directly from PDF in {time.time() - start_time:.2f} seconds")
+                else:
+                    logging.info("Direct text extraction failed, falling back to OCR")
+                    # Convert PDF to images with highly optimized settings
+                    images = convert_from_path(
+                        filepath,
+                        dpi=100,  # Very low DPI for speed
+                        first_page=1,
+                        last_page=1,  # Only process first page
+                        thread_count=1,  # Single thread to reduce memory
+                        grayscale=True  # Grayscale for faster processing
+                    )
+                    logging.info(f"Converted PDF to {len(images)} images in {time.time() - start_time:.2f} seconds")
                     
-                    # Extract text from the image directly without saving
-                    page_text = pytesseract.image_to_string(img)
-                    text += f"\n\n----- PAGE {i+1} -----\n\n{page_text}"
-                    
-                    logging.info(f"Page {i+1} processed in {time.time() - page_start:.2f} seconds")
+                    # OCR the first page only
+                    if images:
+                        text = pytesseract.image_to_string(images[0])
+                        logging.info(f"OCR completed in {time.time() - start_time:.2f} seconds")
+                    else:
+                        return jsonify({"error": "Failed to extract pages from PDF"}), 500
             else:
                 # For image files, process directly
                 logging.info("Processing image file")
                 img = Image.open(filepath)
                 text = pytesseract.image_to_string(img)
-                logging.info(f"Image processed in {time.time() - start_time:.2f} seconds")
+                logging.info(f"Image OCR completed in {time.time() - start_time:.2f} seconds")
             
             # Clean up the file
-            os.remove(filepath)
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                logging.warning(f"Failed to remove temp file: {e}")
             
             # Parse data with regex
             parsing_start = time.time()
@@ -426,7 +509,10 @@ def extract():
             logging.error(f"Error processing file: {e}")
             # Clean up the file in case of error
             if os.path.exists(filepath):
-                os.remove(filepath)
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
             return jsonify({"error": str(e)}), 500
     
     return jsonify({"error": "File type not allowed"}), 400

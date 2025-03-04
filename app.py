@@ -21,7 +21,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
-ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL')
+ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.cloud/core/api/v2/create-record')
 
 # HTML template
 HTML_TEMPLATE = '''
@@ -132,6 +132,15 @@ HTML_TEMPLATE = '''
                     </div>
                 </div>
                 
+                <div id="alchemyAlerts" class="mt-3" style="display: none;">
+                    <div class="alert alert-success" id="successAlert" style="display: none;">
+                        Data successfully sent to Alchemy!
+                    </div>
+                    <div class="alert alert-danger" id="errorAlert" style="display: none;">
+                        <span id="errorMessage">Error sending data to Alchemy</span>
+                    </div>
+                </div>
+                
                 <div id="results" class="result-box" style="display: none;">
                     <h5>Extracted Data:</h5>
                     <table class="table table-bordered">
@@ -156,7 +165,7 @@ HTML_TEMPLATE = '''
             </div>
             <div class="mb-3">
                 <label for="apiUrl" class="form-label">API URL</label>
-                <input type="text" class="form-control" id="apiUrl">
+                <input type="text" class="form-control" id="apiUrl" value="https://core-production.alchemy.cloud/core/api/v2/create-record">
             </div>
             <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
             
@@ -184,10 +193,14 @@ HTML_TEMPLATE = '''
             const progressBar = document.getElementById('progressBar');
             const imageOption = document.getElementById('imageOption');
             const pdfOption = document.getElementById('pdfOption');
+            const alchemyAlerts = document.getElementById('alchemyAlerts');
+            const successAlert = document.getElementById('successAlert');
+            const errorAlert = document.getElementById('errorAlert');
+            const errorMessage = document.getElementById('errorMessage');
             
             // Load saved API settings from localStorage
             apiKey.value = localStorage.getItem('alchemyApiKey') || '';
-            apiUrl.value = localStorage.getItem('alchemyApiUrl') || '';
+            apiUrl.value = localStorage.getItem('alchemyApiUrl') || 'https://core-production.alchemy.cloud/core/api/v2/create-record';
             
             // Save API settings to localStorage when changed
             apiKey.addEventListener('change', () => {
@@ -240,6 +253,7 @@ HTML_TEMPLATE = '''
                 results.style.display = 'none';
                 sendToAlchemy.disabled = true;
                 apiResponse.style.display = 'none';
+                alchemyAlerts.style.display = 'none';
                 extractedData = null;
                 
                 // Show processing status
@@ -355,26 +369,22 @@ HTML_TEMPLATE = '''
                 statusText.textContent = 'Sending data to Alchemy...';
                 progressBar.style.width = '50%';
                 
-                // Prepare data for Alchemy
+                // Hide previous alerts
+                alchemyAlerts.style.display = 'none';
+                successAlert.style.display = 'none';
+                errorAlert.style.display = 'none';
+                
+                // Format data for Alchemy's expected structure
                 const payload = {
-                    document_type: extractedData.document_type || 'Unknown',
-                    product_name: extractedData.product_name || '',
-                    purity: extractedData.purity || '',
-                    lot_number: extractedData.lot_number || '',
-                    cas_number: extractedData.cas_number || '',
-                    date_of_analysis: extractedData.date_of_analysis || '',
-                    expiry_date: extractedData.expiry_date || '',
-                    formula: extractedData.formula || '',
-                    molecular_weight: extractedData.molecular_weight || '',
-                    ordering_number: extractedData.ordering_number || '',
-                    storage_conditions: extractedData.storage_conditions || ''
+                    data: extractedData,
+                    api_key: apiKey.value,
+                    api_url: apiUrl.value
                 };
                 
-                fetch(apiUrl.value, {
+                fetch('/send-to-alchemy', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey.value}`
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(payload)
                 })
@@ -386,10 +396,30 @@ HTML_TEMPLATE = '''
                     // Show API response
                     apiResponse.style.display = 'block';
                     responseText.textContent = JSON.stringify(data, null, 2);
+                    
+                    // Show appropriate alert
+                    alchemyAlerts.style.display = 'block';
+                    if (data.status === 'success') {
+                        successAlert.style.display = 'block';
+                        errorAlert.style.display = 'none';
+                    } else {
+                        successAlert.style.display = 'none';
+                        errorAlert.style.display = 'block';
+                        errorMessage.textContent = data.message || 'Error sending data to Alchemy';
+                    }
                 })
                 .catch(error => {
+                    // Hide processing status
                     processingStatus.style.display = 'none';
                     console.error('Error:', error);
+                    
+                    // Show error alert
+                    alchemyAlerts.style.display = 'block';
+                    successAlert.style.display = 'none';
+                    errorAlert.style.display = 'block';
+                    errorMessage.textContent = error.message || 'Failed to send data to Alchemy';
+                    
+                    // Show response area with error
                     apiResponse.style.display = 'block';
                     responseText.textContent = `Error: ${error.message}`;
                 });
@@ -425,6 +455,21 @@ def extract_text_from_pdf_without_ocr(pdf_path):
     except Exception as e:
         logging.error(f"Error extracting text directly from PDF: {e}")
         return None
+
+def format_purity_value(purity_string):
+    """Extract and format the purity value for Alchemy API"""
+    if not purity_string:
+        return ""
+        
+    # Remove any % signs
+    purity_string = purity_string.replace('%', '').strip()
+    
+    # Try to extract the first number (e.g., get "99.95" from "99.95 ± 0.02")
+    parts = purity_string.split()
+    if parts:
+        return parts[0].strip()
+    
+    return purity_string
 
 def parse_coa_data(text):
     """Parse data from text for both COAs and technical data sheets"""
@@ -632,32 +677,134 @@ def send_to_alchemy():
     data = request.json
     
     if not data:
-        return jsonify({"error": "No data provided"}), 400
+        return jsonify({"status": "error", "message": "No data provided"}), 400
     
     # Get API key and URL from request or environment variables
     api_key = data.get('api_key') or ALCHEMY_API_KEY
     api_url = data.get('api_url') or ALCHEMY_API_URL
     
-    if not api_key or not api_url:
-        return jsonify({"error": "Missing API credentials"}), 400
+    if not api_key:
+        return jsonify({"status": "error", "message": "Missing API key"}), 400
     
     try:
-        # Prepare payload for Alchemy
-        payload = data.get('data', {})
+        # Extract the data received from the client
+        extracted_data = data.get('data', {})
         
-        # Send to Alchemy API
+        # Format purity value - extract just the numeric part
+        purity_value = format_purity_value(extracted_data.get('purity', ""))
+        
+        # Format data for Alchemy API according to their expected structure
+        alchemy_payload = [
+            {
+                "processId": None,
+                "recordTemplate": "exampleParsing",
+                "properties": [
+                    {
+                        "identifier": "RecordName",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "CasNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('cas_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "Purity",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": purity_value,
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "LotNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('lot_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+        
+      # Send to Alchemy API
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
-        response = requests.post(api_url, headers=headers, json=payload)
+        logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
+        response = requests.post(api_url, headers=headers, json=alchemy_payload)
+        
+        # Log response for debugging
+        logging.info(f"Alchemy API response status code: {response.status_code}")
+        logging.info(f"Alchemy API response: {response.text}")
+        
+        # Check if the request was successful
         response.raise_for_status()
         
-        return jsonify(response.json())
+        # Return success response
+        return jsonify({
+            "status": "success", 
+            "message": "Data successfully sent to Alchemy",
+            "response": response.json() if response.text else {"message": "No content in response"}
+        })
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error sending to Alchemy: {e}")
+        
+        # Try to capture response content if available
+        error_response = None
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_response = e.response.json()
+            except:
+                error_response = {"text": e.response.text}
+        
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "details": error_response
+        }), 500
+        
     except Exception as e:
         logging.error(f"Error sending to Alchemy: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

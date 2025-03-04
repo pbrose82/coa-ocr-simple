@@ -20,11 +20,21 @@ app = Flask(__name__)
 # Configuration
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
-ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
+
+# Alchemy API Configuration
+ALCHEMY_REFRESH_TOKEN = os.getenv('ALCHEMY_REFRESH_TOKEN')
+ALCHEMY_REFRESH_URL = os.getenv('ALCHEMY_REFRESH_URL', 'https://core-production.alchemy.cloud/core/api/v2/refresh-token')
 ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.cloud/core/api/v2/create-record')
 ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
+ALCHEMY_TENANT_NAME = os.getenv('ALCHEMY_TENANT_NAME', 'productcaseelnlims4uat')
 
-# HTML template
+# Token cache with expiration
+alchemy_token_cache = {
+    "access_token": None,
+    "expires_at": 0  # Unix timestamp when the token expires
+}
+
+# HTML template - your existing template
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -165,25 +175,21 @@ HTML_TEMPLATE = '''
             </div>
         </div>
         
-        <div class="api-settings mt-4">
-            <h5>Alchemy API Settings</h5>
-            <div class="mb-3">
-                <label for="apiKey" class="form-label">API Key</label>
-                <input type="password" class="form-control" id="apiKey">
+        <div class="api-settings mt-4 card">
+            <div class="card-header">
+                <h5 class="mb-0">Alchemy API Settings</h5>
             </div>
-            <div class="mb-3">
-                <label for="apiUrl" class="form-label">API URL</label>
-                <input type="text" class="form-control" id="apiUrl" value="https://core-production.alchemy.cloud/core/api/v2/create-record">
-            </div>
-            <div class="mb-3">
-                <label for="baseUrl" class="form-label">Alchemy Base URL</label>
-                <input type="text" class="form-control" id="baseUrl" value="https://app.alchemy.cloud/productcaseelnlims4uat/record/">
-            </div>
-            <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
-            
-            <div id="apiResponse" class="mt-3" style="display: none;">
-                <h5>API Response:</h5>
-                <pre id="responseText"></pre>
+            <div class="card-body">
+                <div class="alert alert-success">
+                    <strong>Authentication Upgrade!</strong> This app now supports Refresh Token authentication.
+                    No need to manually enter API Key - it's handled automatically.
+                </div>
+                <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
+                
+                <div id="apiResponse" class="mt-3" style="display: none;">
+                    <h5>API Response:</h5>
+                    <pre id="responseText"></pre>
+                </div>
             </div>
         </div>
     </div>
@@ -196,9 +202,6 @@ HTML_TEMPLATE = '''
             const dataTable = document.getElementById('dataTable');
             const rawText = document.getElementById('rawText');
             const sendToAlchemy = document.getElementById('sendToAlchemy');
-            const apiKey = document.getElementById('apiKey');
-            const apiUrl = document.getElementById('apiUrl');
-            const baseUrl = document.getElementById('baseUrl');
             const apiResponse = document.getElementById('apiResponse');
             const responseText = document.getElementById('responseText');
             const processingStatus = document.getElementById('processingStatus');
@@ -211,24 +214,6 @@ HTML_TEMPLATE = '''
             const errorAlert = document.getElementById('errorAlert');
             const errorMessage = document.getElementById('errorMessage');
             const recordLink = document.getElementById('recordLink');
-            
-            // Load saved API settings from localStorage
-            apiKey.value = localStorage.getItem('alchemyApiKey') || '';
-            apiUrl.value = localStorage.getItem('alchemyApiUrl') || 'https://core-production.alchemy.cloud/core/api/v2/create-record';
-            baseUrl.value = localStorage.getItem('alchemyBaseUrl') || 'https://app.alchemy.cloud/productcaseelnlims4uat/record/';
-            
-            // Save API settings to localStorage when changed
-            apiKey.addEventListener('change', () => {
-                localStorage.setItem('alchemyApiKey', apiKey.value);
-            });
-            
-            apiUrl.addEventListener('change', () => {
-                localStorage.setItem('alchemyApiUrl', apiUrl.value);
-            });
-            
-            baseUrl.addEventListener('change', () => {
-                localStorage.setItem('alchemyBaseUrl', baseUrl.value);
-            });
             
             // Set file input accept attribute based on file type selection
             imageOption.addEventListener('change', () => {
@@ -378,8 +363,8 @@ HTML_TEMPLATE = '''
             });
             
             sendToAlchemy.addEventListener('click', function() {
-                if (!extractedData || !apiKey.value || !apiUrl.value) {
-                    alert('Missing data or API settings');
+                if (!extractedData) {
+                    alert('No data to send to Alchemy');
                     return;
                 }
                 
@@ -395,10 +380,7 @@ HTML_TEMPLATE = '''
                 
                 // Format data for Alchemy's expected structure
                 const payload = {
-                    data: extractedData,
-                    api_key: apiKey.value,
-                    api_url: apiUrl.value,
-                    base_url: baseUrl.value
+                    data: extractedData
                 };
                 
                 fetch('/send-to-alchemy', {
@@ -460,6 +442,62 @@ HTML_TEMPLATE = '''
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+async def refresh_alchemy_token():
+    """
+    Refresh the Alchemy API token using the refresh token.
+    Returns the access token for the specified tenant.
+    """
+    global alchemy_token_cache
+    
+    # Check if we have a cached token that's still valid (with 5 min buffer)
+    current_time = time.time()
+    if (alchemy_token_cache["access_token"] and 
+        alchemy_token_cache["expires_at"] > current_time + 300):
+        logging.info("Using cached Alchemy token")
+        return alchemy_token_cache["access_token"]
+    
+    if not ALCHEMY_REFRESH_TOKEN:
+        logging.error("Missing ALCHEMY_REFRESH_TOKEN environment variable")
+        return None
+    
+    try:
+        logging.info("Refreshing Alchemy API token")
+        response = requests.put(
+            ALCHEMY_REFRESH_URL, 
+            json={"refreshToken": ALCHEMY_REFRESH_TOKEN},
+            headers={"Content-Type": "application/json"}
+        )
+        
+        if not response.ok:
+            logging.error(f"Failed to refresh token. Status: {response.status_code}, Response: {response.text}")
+            return None
+        
+        data = response.json()
+        
+        # Find token for the specified tenant
+        tenant_token = next((token for token in data.get("tokens", []) 
+                            if token.get("tenant") == ALCHEMY_TENANT_NAME), None)
+        
+        if not tenant_token:
+            logging.error(f"Tenant '{ALCHEMY_TENANT_NAME}' not found in refresh response")
+            return None
+        
+        # Cache the token with expiration time (default to 1 hour if not provided)
+        access_token = tenant_token.get("accessToken")
+        expires_in = tenant_token.get("expiresIn", 3600)
+        
+        alchemy_token_cache = {
+            "access_token": access_token,
+            "expires_at": current_time + expires_in
+        }
+        
+        logging.info(f"Successfully refreshed Alchemy token, expires in {expires_in} seconds")
+        return access_token
+        
+    except Exception as e:
+        logging.error(f"Error refreshing Alchemy token: {str(e)}")
+        return None
 
 @app.route('/')
 def index():
@@ -687,186 +725,3 @@ def extract():
             logging.info(f"Total processing time: {total_time:.2f} seconds")
             
             return jsonify(data)
-            
-        except Exception as e:
-            logging.error(f"Error processing file: {e}")
-            # Clean up the file in case of error
-            if os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
-            return jsonify({"error": str(e)}), 500
-    
-    return jsonify({"error": "File type not allowed"}), 400
-
-@app.route('/send-to-alchemy', methods=['POST'])
-def send_to_alchemy():
-    data = request.json
-    
-    if not data:
-        return jsonify({"status": "error", "message": "No data provided"}), 400
-    
-    # Get API key and URL from request or environment variables
-    api_key = data.get('api_key') or ALCHEMY_API_KEY
-    api_url = data.get('api_url') or ALCHEMY_API_URL
-    base_url = data.get('base_url') or ALCHEMY_BASE_URL
-    
-    if not api_key:
-        return jsonify({"status": "error", "message": "Missing API key"}), 400
-    
-    try:
-        # Extract the data received from the client
-        extracted_data = data.get('data', {})
-        
-        # Format purity value - extract just the numeric part
-        purity_value = format_purity_value(extracted_data.get('purity', ""))
-        
-        # Format data for Alchemy API - exactly matching the Postman structure
-        alchemy_payload = [
-            {
-                "processId": None,
-                "recordTemplate": "exampleParsing",
-                "properties": [
-                    {
-                        "identifier": "RecordName",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('product_name', "Unknown Product"),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "CasNumber",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('cas_number', ""),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "Purity",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": purity_value,
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "LotNumber",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('lot_number', ""),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
-        
-        # Send to Alchemy API
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
-        response = requests.post(api_url, headers=headers, json=alchemy_payload)
-        
-        # Log response for debugging
-        logging.info(f"Alchemy API response status code: {response.status_code}")
-        logging.info(f"Alchemy API response: {response.text}")
-        
-        # Check if the request was successful
-        response.raise_for_status()
-        
-        # Try to extract the record ID from the response
-        record_id = None
-        record_url = None
-        try:
-            response_data = response.json()
-            # Extract record ID from response - adjust this based on actual response structure
-            if isinstance(response_data, list) and len(response_data) > 0:
-                if 'id' in response_data[0]:
-                    record_id = response_data[0]['id']
-                elif 'recordId' in response_data[0]:
-                    record_id = response_data[0]['recordId']
-            elif isinstance(response_data, dict):
-                if 'id' in response_data:
-                    record_id = response_data['id']
-                elif 'recordId' in response_data:
-                    record_id = response_data['recordId']
-                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
-                    if 'id' in response_data['data'][0]:
-                        record_id = response_data['data'][0]['id']
-                    elif 'recordId' in response_data['data'][0]:
-                        record_id = response_data['data'][0]['recordId']
-            
-            # If record ID was found, construct the URL
-            if record_id:
-                record_url = f"{base_url.rstrip('/')}/{record_id}"
-                logging.info(f"Created record URL: {record_url}")
-            
-        except Exception as e:
-            logging.warning(f"Could not extract record ID from response: {e}")
-        
-        # Return success response with record URL if available
-        return jsonify({
-            "status": "success", 
-            "message": "Data successfully sent to Alchemy",
-            "response": response.json() if response.text else {"message": "No content in response"},
-            "record_id": record_id,
-            "record_url": record_url
-        })
-        
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Request error sending to Alchemy: {e}")
-        
-        # Try to capture response content if available
-        error_response = None
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_response = e.response.json()
-            except:
-                error_response = {"text": e.response.text}
-        
-        return jsonify({
-            "status": "error", 
-            "message": str(e),
-            "details": error_response
-        }), 500
-        
-    except Exception as e:
-        logging.error(f"Error sending to Alchemy: {e}")
-        return jsonify({
-            "status": "error", 
-            "message": str(e)
-        }), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)

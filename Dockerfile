@@ -1,9 +1,10 @@
 FROM python:3.9-slim
 
-# Install Tesseract OCR
+# Install Tesseract OCR and Poppler (needed for PDF processing)
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
+    poppler-utils \  # Add this line for PDF support
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

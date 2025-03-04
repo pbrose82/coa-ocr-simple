@@ -456,7 +456,8 @@ def refresh_alchemy_token():
         return False
     
     try:
-        refresh_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/auth/refresh"
+        # Use the correct endpoint and HTTP method
+        refresh_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/refresh-token"
         headers = {
             "Content-Type": "application/json"
         }
@@ -464,7 +465,8 @@ def refresh_alchemy_token():
             "refreshToken": ALCHEMY_REFRESH_TOKEN
         }
         
-        response = requests.post(refresh_url, headers=headers, json=payload)
+        # Using PUT method instead of POST
+        response = requests.put(refresh_url, headers=headers, json=payload)
         response.raise_for_status()
         
         data = response.json()

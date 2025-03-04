@@ -755,7 +755,7 @@ def extract():
         except Exception as e:
             logging.error(f"Error processing file: {e}")
             # Clean up the file in case of error
-    if os.path.exists(filepath):
+if os.path.exists(filepath):
                 try:
                     os.remove(filepath)
                 except:
@@ -886,3 +886,5 @@ def send_to_alchemy():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
+   

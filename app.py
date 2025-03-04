@@ -693,7 +693,7 @@ def send_to_alchemy():
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))
         
-        # Format data for Alchemy API according to their expected structure
+        # Format data for Alchemy API - exactly matching the Postman structure
         alchemy_payload = [
             {
                 "processId": None,
@@ -759,7 +759,7 @@ def send_to_alchemy():
             }
         ]
         
-      # Send to Alchemy API
+        # Send to Alchemy API
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"

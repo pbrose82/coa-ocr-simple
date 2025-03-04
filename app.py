@@ -754,74 +754,16 @@ def send_to_alchemy():
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))
         
-        # Use the correct endpoint
+        # Let's try a simpler approach - post directly to the endpoint
         create_record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/create-record"
         
-        # Format data for Alchemy API - using the structure from your Postman example
-        alchemy_payload = [
-            {
-                "processId": None,
-                "recordTemplate": "exampleParsing",
-                "properties": [
-                    {
-                        "identifier": "RecordName",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('product_name', "Unknown Product"),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "CasNumber",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('cas_number', ""),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "Purity",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": purity_value,
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "identifier": "LotNumber",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('lot_number', ""),
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
+        # Try a simpler payload structure without specifying a template
+        alchemy_payload = {
+            "RecordName": extracted_data.get('product_name', "Unknown Product"),
+            "CasNumber": extracted_data.get('cas_number', ""),
+            "Purity": purity_value,
+            "LotNumber": extracted_data.get('lot_number', "")
+        }
         
         # Send to Alchemy API using the token
         headers = {
@@ -845,14 +787,7 @@ def send_to_alchemy():
         record_url = None
         try:
             response_data = response.json()
-            # Handle different response formats
-            if isinstance(response_data, list) and len(response_data) > 0:
-                record_data = response_data[0]
-                if 'id' in record_data:
-                    record_id = record_data['id']
-                elif 'recordId' in record_data:
-                    record_id = record_data['recordId']
-            elif isinstance(response_data, dict):
+            if isinstance(response_data, dict):
                 if 'id' in response_data:
                     record_id = response_data['id']
                 elif 'recordId' in response_data:

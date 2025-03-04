@@ -8,6 +8,7 @@ import requests
 from werkzeug.utils import secure_filename
 import uuid
 import logging
+from pdf2image import convert_from_path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -302,9 +303,34 @@ def extract():
             # Save the file temporarily
             file.save(filepath)
             
-            # Process with OCR
-            img = Image.open(filepath)
-            text = pytesseract.image_to_string(img)
+            # Process with OCR - handle different file types
+            if filepath.lower().endswith('.pdf'):
+                # For PDFs, use pdf2image to convert to images first
+                
+                # Convert PDF to images
+                images = convert_from_path(filepath)
+                
+                # OCR the first page (or you could loop through all pages)
+                text = ""
+                for i, img in enumerate(images):
+                    # You might want to limit to just the first few pages
+                    if i >= 3:  # Process only up to 3 pages
+                        break
+                    
+                    # Save image temporarily
+                    img_path = f"{filepath}_page_{i}.jpg"
+                    img.save(img_path, 'JPEG')
+                    
+                    # Extract text from the image
+                    page_text = pytesseract.image_to_string(img)
+                    text += f"\n\n----- PAGE {i+1} -----\n\n{page_text}"
+                    
+                    # Clean up the temporary image
+                    os.remove(img_path)
+            else:
+                # For image files, process directly
+                img = Image.open(filepath)
+                text = pytesseract.image_to_string(img)
             
             # Clean up the file
             os.remove(filepath)
@@ -318,6 +344,9 @@ def extract():
             return jsonify(data)
         except Exception as e:
             logging.error(f"Error processing file: {e}")
+            # Clean up the file in case of error
+            if os.path.exists(filepath):
+                os.remove(filepath)
             return jsonify({"error": str(e)}), 500
     
     return jsonify({"error": "File type not allowed"}), 400

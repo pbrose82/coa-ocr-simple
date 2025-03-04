@@ -549,12 +549,12 @@ def send_to_alchemy():
         logging.error(f"Error sending to Alchemy: {e}")
         return jsonify({"error": str(e)}), 500
 
-def parse_coa_data(text):
-    """Parse COA data from text"""
+def parse_data(text):
+    """Parse data from text for both COAs and technical data sheets"""
     data = {}
     
-    # Define regex patterns for key fields
-    patterns = {
+    # Define regex patterns for different documents
+    coa_patterns = {
         "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM|[A-Z]{3,})",
         "purity": r"(?:Certified\s+purity|Det\.\s+Purity):\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
         "lot_number": r"Lot\s+(?:number|No\.?):\s*([A-Za-z0-9\-\/]+)",
@@ -565,13 +565,31 @@ def parse_coa_data(text):
         "molecular_weight": r"Mol\.\s+Weight:\s*([\d\.]+)",
     }
     
-    # Extract data using patterns
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match and key != "product_name":
-            data[key] = match.group(1).strip()
-        elif match:
-            data[key] = match.group(0).strip()
+    technical_sheet_patterns = {
+        "product_name": r"^([A-Za-z®\s]+)\s*$",
+        "ordering_number": r"Ordering\s+number:\s*([0-9\.]+)",
+        "document_type": r"(Technical\s+Data\s+Sheet)",
+        "storage_conditions": r"stored\s+([^\.]+)",
+        "shelf_life": r"The\s+product\s+can\s+be\s+used\s+([^\.]+)",
+    }
+    
+    # First check if this looks like a COA by looking for key terms
+    if re.search(r"(Certificate\s+of\s+Analysis|Certified\s+purity|Analytical\s+Data)", text, re.IGNORECASE):
+        # Extract COA data
+        for key, pattern in coa_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match and key != "product_name":
+                data[key] = match.group(1).strip()
+            elif match:
+                data[key] = match.group(0).strip()
+        data["document_type"] = "Certificate of Analysis"
+    else:
+        # Extract Technical Sheet data
+        for key, pattern in technical_sheet_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data[key] = match.group(1).strip()
+        data["document_type"] = "Technical Data Sheet"
     
     return data
 

@@ -109,11 +109,11 @@ HTML_TEMPLATE = '''
             <div class="card-body">
                 <div class="file-type-toggle">
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image" checked>
+                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image">
                         <label class="form-check-label" for="imageOption">Image (faster)</label>
                     </div>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf">
+                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf" checked>
                         <label class="form-check-label" for="pdfOption">PDF</label>
                     </div>
                 </div>
@@ -143,7 +143,7 @@ HTML_TEMPLATE = '''
                     <div class="alert alert-success" id="successAlert" style="display: none;">
                         <div>Data successfully sent to Alchemy!</div>
                         <div class="record-link">
-                            <a href="#" id="recordLink" target="_blank">View record in Alchemy</a>
+                            <a href="#" id="product_name" target="_blank">View record in Alchemy</a>
                         </div>
                     </div>
                     <div class="alert alert-danger" id="errorAlert" style="display: none;">

@@ -8,6 +8,7 @@ import requests
 from werkzeug.utils import secure_filename
 import uuid
 import logging
+import time
 from pdf2image import convert_from_path
 
 # Setup logging
@@ -70,6 +71,11 @@ HTML_TEMPLATE = '''
             border: 1px solid #ddd;
             border-radius: 5px;
         }
+        .processing-status {
+            display: none;
+            margin-top: 15px;
+            padding: 10px;
+        }
     </style>
 </head>
 <body>
@@ -85,9 +91,22 @@ HTML_TEMPLATE = '''
                     <div class="mb-3">
                         <label for="file" class="form-label">Select COA file (JPG, PNG, PDF, TIFF)</label>
                         <input class="form-control" type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
+                        <div class="form-text text-muted">
+                            PDFs may take longer to process. For faster results, consider uploading images.
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary">Extract Data</button>
                 </form>
+                
+                <div id="processingStatus" class="alert alert-info processing-status">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        <span id="statusText">Processing your document...</span>
+                    </div>
+                    <div class="progress mt-2" style="height: 5px;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                    </div>
+                </div>
                 
                 <div id="loader" class="loader"></div>
                 
@@ -138,6 +157,9 @@ HTML_TEMPLATE = '''
             const apiUrl = document.getElementById('apiUrl');
             const apiResponse = document.getElementById('apiResponse');
             const responseText = document.getElementById('responseText');
+            const processingStatus = document.getElementById('processingStatus');
+            const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
             
             // Load saved API settings from localStorage
             apiKey.value = localStorage.getItem('alchemyApiKey') || '';
@@ -153,6 +175,7 @@ HTML_TEMPLATE = '''
             });
             
             let extractedData = null;
+            let processingTimeout;
             
             uploadForm.addEventListener('submit', function(e) {
                 e.preventDefault();
@@ -172,8 +195,36 @@ HTML_TEMPLATE = '''
                 sendToAlchemy.disabled = true;
                 extractedData = null;
                 
-                // Show loader
-                loader.style.display = 'block';
+                // Show processing status
+                processingStatus.style.display = 'block';
+                statusText.textContent = 'Uploading document...';
+                progressBar.style.width = '10%';
+                
+                // Clear any existing timeout
+                if (processingTimeout) clearTimeout(processingTimeout);
+                
+                // Set up simulated progress for user feedback
+                let progress = 10;
+                const progressInterval = setInterval(() => {
+                    if (progress < 90) {
+                        progress += Math.random() * 10;
+                        progressBar.style.width = `${progress}%`;
+                        
+                        // Update status text based on progress
+                        if (progress > 20 && progress < 40) {
+                            statusText.textContent = 'Processing document...';
+                        } else if (progress > 40 && progress < 60) {
+                            statusText.textContent = 'Extracting text with OCR...';
+                        } else if (progress > 60 && progress < 80) {
+                            statusText.textContent = 'Analyzing data...';
+                        }
+                    }
+                }, 2000);
+                
+                // Set timeout to show warning after 30 seconds
+                processingTimeout = setTimeout(() => {
+                    statusText.textContent = 'Still processing... PDF files may take longer';
+                }, 30000);
                 
                 const formData = new FormData();
                 formData.append('file', file);
@@ -184,8 +235,12 @@ HTML_TEMPLATE = '''
                 })
                 .then(response => response.json())
                 .then(data => {
-                    // Hide loader
-                    loader.style.display = 'none';
+                    // Clear intervals and timeouts
+                    clearInterval(progressInterval);
+                    if (processingTimeout) clearTimeout(processingTimeout);
+                    
+                    // Hide processing indicators
+                    processingStatus.style.display = 'none';
                     
                     if (data.error) {
                         alert('Error: ' + data.error);
@@ -203,7 +258,7 @@ HTML_TEMPLATE = '''
                         if (key !== 'full_text') {
                             const row = document.createElement('tr');
                             row.innerHTML = `
-                                <td><strong>${key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
+                                <td><strong>${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}</strong></td>
                                 <td>${value}</td>
                             `;
                             dataTable.appendChild(row);
@@ -219,9 +274,15 @@ HTML_TEMPLATE = '''
                     }
                 })
                 .catch(error => {
-                    loader.style.display = 'none';
+                    // Clear intervals and timeouts
+                    clearInterval(progressInterval);
+                    if (processingTimeout) clearTimeout(processingTimeout);
+                    
+                    // Hide processing indicators
+                    processingStatus.style.display = 'none';
+                    
                     console.error('Error:', error);
-                    alert('Error processing file');
+                    alert('Error processing file. If you uploaded a PDF, it may be too large or complex. Try again with a smaller file or an image instead.');
                 });
             });
             
@@ -231,8 +292,10 @@ HTML_TEMPLATE = '''
                     return;
                 }
                 
-                // Show loader
-                loader.style.display = 'block';
+                // Show processing status
+                processingStatus.style.display = 'block';
+                statusText.textContent = 'Sending data to Alchemy...';
+                progressBar.style.width = '50%';
                 
                 // Prepare data for Alchemy
                 const payload = {
@@ -254,15 +317,15 @@ HTML_TEMPLATE = '''
                 })
                 .then(response => response.json())
                 .then(data => {
-                    // Hide loader
-                    loader.style.display = 'none';
+                    // Hide processing status
+                    processingStatus.style.display = 'none';
                     
                     // Show API response
                     apiResponse.style.display = 'block';
                     responseText.textContent = JSON.stringify(data, null, 2);
                 })
                 .catch(error => {
-                    loader.style.display = 'none';
+                    processingStatus.style.display = 'none';
                     console.error('Error:', error);
                     apiResponse.style.display = 'block';
                     responseText.textContent = `Error: ${error.message}`;
@@ -300,48 +363,65 @@ def extract():
         filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
         
         try:
+            # Start timing
+            start_time = time.time()
+            logging.info(f"Starting processing for {filename}")
+            
             # Save the file temporarily
             file.save(filepath)
+            logging.info(f"File saved at {filepath}")
             
             # Process with OCR - handle different file types
             if filepath.lower().endswith('.pdf'):
+                logging.info("Processing PDF file")
                 # For PDFs, use pdf2image to convert to images first
                 
-                # Convert PDF to images
-                images = convert_from_path(filepath)
+                # Convert PDF to images with optimized settings
+                logging.info("Converting PDF to images")
+                images = convert_from_path(
+                    filepath,
+                    dpi=150,  # Lower DPI for faster processing 
+                    first_page=1,
+                    last_page=3,  # Only process up to 3 pages
+                    thread_count=2  # Use parallel processing
+                )
+                logging.info(f"Converted PDF to {len(images)} images in {time.time() - start_time:.2f} seconds")
                 
-                # OCR the first page (or you could loop through all pages)
+                # OCR the pages
                 text = ""
                 for i, img in enumerate(images):
-                    # You might want to limit to just the first few pages
-                    if i >= 3:  # Process only up to 3 pages
-                        break
+                    page_start = time.time()
+                    logging.info(f"Processing page {i+1}")
                     
-                    # Save image temporarily
-                    img_path = f"{filepath}_page_{i}.jpg"
-                    img.save(img_path, 'JPEG')
-                    
-                    # Extract text from the image
+                    # Extract text from the image directly without saving
                     page_text = pytesseract.image_to_string(img)
                     text += f"\n\n----- PAGE {i+1} -----\n\n{page_text}"
                     
-                    # Clean up the temporary image
-                    os.remove(img_path)
+                    logging.info(f"Page {i+1} processed in {time.time() - page_start:.2f} seconds")
             else:
                 # For image files, process directly
+                logging.info("Processing image file")
                 img = Image.open(filepath)
                 text = pytesseract.image_to_string(img)
+                logging.info(f"Image processed in {time.time() - start_time:.2f} seconds")
             
             # Clean up the file
             os.remove(filepath)
             
             # Parse data with regex
+            parsing_start = time.time()
+            logging.info("Parsing extracted text")
             data = parse_coa_data(text)
+            logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
             
             # Add the full text
             data['full_text'] = text
             
+            total_time = time.time() - start_time
+            logging.info(f"Total processing time: {total_time:.2f} seconds")
+            
             return jsonify(data)
+            
         except Exception as e:
             logging.error(f"Error processing file: {e}")
             # Clean up the file in case of error
@@ -412,12 +492,3 @@ def parse_coa_data(text):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
-# When converting PDF to images
-images = convert_from_path(
-    filepath,
-    dpi=150,  # Lower DPI for faster processing
-    first_page=1,
-    last_page=3,  # Only process first 3 pages max
-    thread_count=2  # Use parallel processing
-)

@@ -22,6 +22,7 @@ UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
 ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.cloud/core/api/v2/create-record')
+ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
 
 # HTML template
 HTML_TEMPLATE = '''
@@ -80,6 +81,10 @@ HTML_TEMPLATE = '''
         .file-type-toggle {
             margin-bottom: 15px;
         }
+        .record-link {
+            margin-top: 10px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -134,7 +139,10 @@ HTML_TEMPLATE = '''
                 
                 <div id="alchemyAlerts" class="mt-3" style="display: none;">
                     <div class="alert alert-success" id="successAlert" style="display: none;">
-                        Data successfully sent to Alchemy!
+                        <div>Data successfully sent to Alchemy!</div>
+                        <div class="record-link">
+                            <a href="#" id="recordLink" target="_blank">View record in Alchemy</a>
+                        </div>
                     </div>
                     <div class="alert alert-danger" id="errorAlert" style="display: none;">
                         <span id="errorMessage">Error sending data to Alchemy</span>
@@ -167,6 +175,10 @@ HTML_TEMPLATE = '''
                 <label for="apiUrl" class="form-label">API URL</label>
                 <input type="text" class="form-control" id="apiUrl" value="https://core-production.alchemy.cloud/core/api/v2/create-record">
             </div>
+            <div class="mb-3">
+                <label for="baseUrl" class="form-label">Alchemy Base URL</label>
+                <input type="text" class="form-control" id="baseUrl" value="https://app.alchemy.cloud/productcaseelnlims4uat/record/">
+            </div>
             <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
             
             <div id="apiResponse" class="mt-3" style="display: none;">
@@ -186,6 +198,7 @@ HTML_TEMPLATE = '''
             const sendToAlchemy = document.getElementById('sendToAlchemy');
             const apiKey = document.getElementById('apiKey');
             const apiUrl = document.getElementById('apiUrl');
+            const baseUrl = document.getElementById('baseUrl');
             const apiResponse = document.getElementById('apiResponse');
             const responseText = document.getElementById('responseText');
             const processingStatus = document.getElementById('processingStatus');
@@ -197,10 +210,12 @@ HTML_TEMPLATE = '''
             const successAlert = document.getElementById('successAlert');
             const errorAlert = document.getElementById('errorAlert');
             const errorMessage = document.getElementById('errorMessage');
+            const recordLink = document.getElementById('recordLink');
             
             // Load saved API settings from localStorage
             apiKey.value = localStorage.getItem('alchemyApiKey') || '';
             apiUrl.value = localStorage.getItem('alchemyApiUrl') || 'https://core-production.alchemy.cloud/core/api/v2/create-record';
+            baseUrl.value = localStorage.getItem('alchemyBaseUrl') || 'https://app.alchemy.cloud/productcaseelnlims4uat/record/';
             
             // Save API settings to localStorage when changed
             apiKey.addEventListener('change', () => {
@@ -209,6 +224,10 @@ HTML_TEMPLATE = '''
             
             apiUrl.addEventListener('change', () => {
                 localStorage.setItem('alchemyApiUrl', apiUrl.value);
+            });
+            
+            baseUrl.addEventListener('change', () => {
+                localStorage.setItem('alchemyBaseUrl', baseUrl.value);
             });
             
             // Set file input accept attribute based on file type selection
@@ -378,7 +397,8 @@ HTML_TEMPLATE = '''
                 const payload = {
                     data: extractedData,
                     api_key: apiKey.value,
-                    api_url: apiUrl.value
+                    api_url: apiUrl.value,
+                    base_url: baseUrl.value
                 };
                 
                 fetch('/send-to-alchemy', {
@@ -402,6 +422,14 @@ HTML_TEMPLATE = '''
                     if (data.status === 'success') {
                         successAlert.style.display = 'block';
                         errorAlert.style.display = 'none';
+                        
+                        // Set record link if available
+                        if (data.record_url) {
+                            recordLink.href = data.record_url;
+                            recordLink.textContent = `View record ${data.record_id} in Alchemy`;
+                        } else {
+                            recordLink.style.display = 'none';
+                        }
                     } else {
                         successAlert.style.display = 'none';
                         errorAlert.style.display = 'block';
@@ -682,6 +710,7 @@ def send_to_alchemy():
     # Get API key and URL from request or environment variables
     api_key = data.get('api_key') or ALCHEMY_API_KEY
     api_url = data.get('api_url') or ALCHEMY_API_URL
+    base_url = data.get('base_url') or ALCHEMY_BASE_URL
     
     if not api_key:
         return jsonify({"status": "error", "message": "Missing API key"}), 400
@@ -775,11 +804,43 @@ def send_to_alchemy():
         # Check if the request was successful
         response.raise_for_status()
         
-        # Return success response
+        # Try to extract the record ID from the response
+        record_id = None
+        record_url = None
+        try:
+            response_data = response.json()
+            # Extract record ID from response - adjust this based on actual response structure
+            if isinstance(response_data, list) and len(response_data) > 0:
+                if 'id' in response_data[0]:
+                    record_id = response_data[0]['id']
+                elif 'recordId' in response_data[0]:
+                    record_id = response_data[0]['recordId']
+            elif isinstance(response_data, dict):
+                if 'id' in response_data:
+                    record_id = response_data['id']
+                elif 'recordId' in response_data:
+                    record_id = response_data['recordId']
+                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                    if 'id' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['id']
+                    elif 'recordId' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['recordId']
+            
+            # If record ID was found, construct the URL
+            if record_id:
+                record_url = f"{base_url.rstrip('/')}/{record_id}"
+                logging.info(f"Created record URL: {record_url}")
+            
+        except Exception as e:
+            logging.warning(f"Could not extract record ID from response: {e}")
+        
+        # Return success response with record URL if available
         return jsonify({
             "status": "success", 
             "message": "Data successfully sent to Alchemy",
-            "response": response.json() if response.text else {"message": "No content in response"}
+            "response": response.json() if response.text else {"message": "No content in response"},
+            "record_id": record_id,
+            "record_url": record_url
         })
         
     except requests.exceptions.RequestException as e:

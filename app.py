@@ -30,7 +30,7 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>COA OCR Extractor</title>
+    <title>Document OCR Extractor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { 
@@ -84,20 +84,20 @@ HTML_TEMPLATE = '''
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">COA/TDS OCR to Alchemy</h1>
+        <h1 class="text-center mb-4">Document OCR to Alchemy</h1>
         
         <div class="alert alert-info">
             <strong>Tips for best results:</strong>
             <ul class="mb-0">
                 <li>Image files (JPG, PNG) process faster than PDFs</li>
                 <li>PDFs with embedded text work best</li>
-                <li>Use clear, high-resolution images of your COA documents</li>
+                <li>Use clear, high-resolution images of your documents</li>
             </ul>
         </div>
         
         <div class="card">
             <div class="card-header">
-                <h5 class="card-title mb-0">Upload COA Document</h5>
+                <h5 class="card-title mb-0">Upload Document</h5>
             </div>
             <div class="card-body">
                 <div class="file-type-toggle">
@@ -113,7 +113,7 @@ HTML_TEMPLATE = '''
                 
                 <form id="uploadForm" enctype="multipart/form-data" class="mb-3">
                     <div class="mb-3">
-                        <label for="file" class="form-label">Select COA file</label>
+                        <label for="file" class="form-label">Select document file</label>
                         <input class="form-control" type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
                         <div class="form-text text-muted" id="fileTypeHelp">
                             Images process faster. Select file type above to change accepted formats.
@@ -326,8 +326,8 @@ HTML_TEMPLATE = '''
                     // Display raw text
                     rawText.textContent = data.full_text;
                     
-                    // Enable send to Alchemy button if purity was found
-                    if (data.purity && data.purity !== 'Not found') {
+                    // Enable send to Alchemy button if we have data to send
+                    if (data.product_name || data.purity) {
                         sendToAlchemy.disabled = false;
                     }
                 })
@@ -357,14 +357,17 @@ HTML_TEMPLATE = '''
                 
                 // Prepare data for Alchemy
                 const payload = {
-                    purity: extractedData.purity,
+                    document_type: extractedData.document_type || 'Unknown',
                     product_name: extractedData.product_name || '',
+                    purity: extractedData.purity || '',
                     lot_number: extractedData.lot_number || '',
                     cas_number: extractedData.cas_number || '',
                     date_of_analysis: extractedData.date_of_analysis || '',
                     expiry_date: extractedData.expiry_date || '',
                     formula: extractedData.formula || '',
-                    molecular_weight: extractedData.molecular_weight || ''
+                    molecular_weight: extractedData.molecular_weight || '',
+                    ordering_number: extractedData.ordering_number || '',
+                    storage_conditions: extractedData.storage_conditions || ''
                 };
                 
                 fetch(apiUrl.value, {
@@ -422,6 +425,86 @@ def extract_text_from_pdf_without_ocr(pdf_path):
     except Exception as e:
         logging.error(f"Error extracting text directly from PDF: {e}")
         return None
+
+def parse_coa_data(text):
+    """Parse data from text for both COAs and technical data sheets"""
+    data = {}
+    
+    # Determine document type first
+    if re.search(r"Technical\s+Data\s+Sheet", text, re.IGNORECASE):
+        data["document_type"] = "Technical Data Sheet"
+        
+        # Technical Data Sheet specific patterns
+        tech_patterns = {
+            "product_name": r"([A-Za-z®]+\s+TSA\s+Settle)",
+            "ordering_number": r"Ordering\s+number:\s*([0-9\.]+)",
+            "storage_conditions": r"stored\s+([^\.]+)",
+            "shelf_life": r"The\s+product\s+can\s+be\s+used\s+([^\.]+)",
+        }
+        
+        # Extract data using tech sheet patterns
+        for key, pattern in tech_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                # Some patterns capture the whole match, others capture a group
+                if key == "product_name" and match.group(1):
+                    data[key] = match.group(1).strip()
+                elif match.groups() and match.group(1):
+                    data[key] = match.group(1).strip()
+                else:
+                    data[key] = match.group(0).strip()
+    else:
+        # Default to COA if not explicitly a technical data sheet
+        data["document_type"] = "Certificate of Analysis"
+        
+        # COA specific patterns
+        coa_patterns = {
+            "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM|[A-Z]{3,})",
+            "purity": r"(?:Certified\s+purity|Det\.\s+Purity):\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
+            "lot_number": r"Lot\s+(?:number|No\.?):\s*([A-Za-z0-9\-\/]+)",
+            "cas_number": r"CAS\s+No\.?:\s*\[?([0-9\-]+)",
+            "date_of_analysis": r"Date\s+of\s+Analysis:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+            "expiry_date": r"Expiry\s+Date:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+            "formula": r"Formula:\s*([A-Za-z0-9]+)",
+            "molecular_weight": r"Mol\.\s+Weight:\s*([\d\.]+)",
+        }
+        
+        # Extract data using COA patterns
+        for key, pattern in coa_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match and key != "product_name":
+                data[key] = match.group(1).strip() if match.groups() else match.group(0).strip()
+            elif match:
+                data[key] = match.group(0).strip()
+    
+    # Fallback for product name extraction if not found with specific patterns
+    if "product_name" not in data or not data["product_name"]:
+        # Look for any product name after phrases like "Product:" or at the beginning of the document
+        product_match = re.search(r"(?:Product:|Product\s+Name:)\s*([A-Za-z0-9®\s\-]+)", text, re.IGNORECASE)
+        if product_match:
+            data["product_name"] = product_match.group(1).strip()
+        else:
+            # Try to find product name in the beginning of the document
+            lines = text.split('\n')
+            for line in lines[1:20]:  # Check first 20 lines
+                line = line.strip()
+                if line and not line.startswith("Lit.") and not line.startswith("Page") and len(line) < 50:
+                    # This might be a title/product name
+                    if re.match(r"^[A-Za-z0-9®\s\-]+$", line):
+                        data["product_name"] = line
+                        break
+
+        # Try to identify if the "Page" text is being mistakenly identified as product name
+        if "product_name" in data and data["product_name"] and "Page" in data["product_name"]:
+            # This is likely not a valid product name, remove it
+            data.pop("product_name")
+            
+            # Look more specifically for common product name formats
+            product_match = re.search(r"IsoBag®\s+TSA\s+Settle", text, re.IGNORECASE)
+            if product_match:
+                data["product_name"] = product_match.group(0).strip()
+    
+    return data
 
 @app.route('/extract', methods=['POST'])
 def extract():
@@ -494,7 +577,7 @@ def extract():
             # Parse data with regex
             parsing_start = time.time()
             logging.info("Parsing extracted text")
-            data = parse_data(text)
+            data = parse_coa_data(text)
             logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
             
             # Add the full text
@@ -548,50 +631,6 @@ def send_to_alchemy():
     except Exception as e:
         logging.error(f"Error sending to Alchemy: {e}")
         return jsonify({"error": str(e)}), 500
-
-def parse_data(text):
-    """Parse data from text for both COAs and technical data sheets"""
-    data = {}
-    
-    # Define regex patterns for different documents
-    coa_patterns = {
-        "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM|[A-Z]{3,})",
-        "purity": r"(?:Certified\s+purity|Det\.\s+Purity):\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
-        "lot_number": r"Lot\s+(?:number|No\.?):\s*([A-Za-z0-9\-\/]+)",
-        "cas_number": r"CAS\s+No\.?:\s*\[?([0-9\-]+)",
-        "date_of_analysis": r"Date\s+of\s+Analysis:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
-        "expiry_date": r"Expiry\s+Date:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
-        "formula": r"Formula:\s*([A-Za-z0-9]+)",
-        "molecular_weight": r"Mol\.\s+Weight:\s*([\d\.]+)",
-    }
-    
-    technical_sheet_patterns = {
-        "product_name": r"^([A-Za-z®\s]+)\s*$",
-        "ordering_number": r"Ordering\s+number:\s*([0-9\.]+)",
-        "document_type": r"(Technical\s+Data\s+Sheet)",
-        "storage_conditions": r"stored\s+([^\.]+)",
-        "shelf_life": r"The\s+product\s+can\s+be\s+used\s+([^\.]+)",
-    }
-    
-    # First check if this looks like a COA by looking for key terms
-    if re.search(r"(Certificate\s+of\s+Analysis|Certified\s+purity|Analytical\s+Data)", text, re.IGNORECASE):
-        # Extract COA data
-        for key, pattern in coa_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match and key != "product_name":
-                data[key] = match.group(1).strip()
-            elif match:
-                data[key] = match.group(0).strip()
-        data["document_type"] = "Certificate of Analysis"
-    else:
-        # Extract Technical Sheet data
-        for key, pattern in technical_sheet_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                data[key] = match.group(1).strip()
-        data["document_type"] = "Technical Data Sheet"
-    
-    return data
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

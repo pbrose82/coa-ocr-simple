@@ -756,7 +756,6 @@ def send_to_alchemy():
         
         # Format data for Alchemy API - exactly matching the Postman structure
         alchemy_payload = [
-            alchemy_payload = [
             {
                 "processId": None,
                 "recordTemplate": "exampleParsing",

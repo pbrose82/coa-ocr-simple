@@ -89,7 +89,7 @@ HTML_TEMPLATE = '''
 <body>
     <div class="container">
         <div class="header">
-            <img src="data:image/png;base64,''' + ALCHEMY_LOGO_BASE64 + '''" alt="Alchemy Logo" class="logo">
+            
             <h1 class="mb-0">COA OCR to Alchemy</h1>
         </div>
         

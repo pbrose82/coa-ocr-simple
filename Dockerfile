@@ -19,6 +19,5 @@ COPY . .
 # Make port 5000 available
 EXPOSE 5000
 
-# Run the application
+# Run the application with extended timeout
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]
-

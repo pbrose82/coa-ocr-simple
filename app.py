@@ -412,3 +412,12 @@ def parse_coa_data(text):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
+# When converting PDF to images
+images = convert_from_path(
+    filepath,
+    dpi=150,  # Lower DPI for faster processing
+    first_page=1,
+    last_page=3,  # Only process first 3 pages max
+    thread_count=2  # Use parallel processing
+)

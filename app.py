@@ -869,7 +869,7 @@ def send_to_alchemy():
             
             # If record ID was found, construct the URL
             if record_id:
-                record_url = f"{ALCHEMY_BASE_URL.rstrip('/')}/{record_id}"
+                record_url = f"{base_url.rstrip('/')}/{record_id}"
                 logging.info(f"Created record URL: {record_url}")
             
         except Exception as e:

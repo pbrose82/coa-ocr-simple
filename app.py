@@ -84,7 +84,7 @@ HTML_TEMPLATE = '''
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">COA OCR to Alchemy</h1>
+        <h1 class="text-center mb-4">COA/TDS OCR to Alchemy</h1>
         
         <div class="alert alert-info">
             <strong>Tips for best results:</strong>

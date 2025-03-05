@@ -31,6 +31,8 @@ def get_base_css():
             border-radius: 5px;
             white-space: pre-wrap;
             word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
         }}
         .button {{
             display: inline-block;
@@ -50,6 +52,15 @@ def get_base_css():
             margin-bottom: 10px;
             display: block;
         }}
+        .file-info {{
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }}
+        .save-button {{
+            margin-left: 10px;
+            background-color: #2196F3;
+        }}
     """
 
 def get_header_html(title, logo_path):
@@ -61,8 +72,9 @@ def get_header_html(title, logo_path):
     </div>
     """
 
-def get_index_html(app_title, company_name, logo_path):
+def get_index_html(app_title, company_name, logo_path, allowed_extensions):
     """Return the HTML for the index/upload page"""
+    allowed_ext_str = ', '.join(allowed_extensions)
     return f"""
     <!DOCTYPE html>
     <html>
@@ -76,16 +88,17 @@ def get_index_html(app_title, company_name, logo_path):
     <body>
         {get_header_html(app_title, logo_path)}
         
-        <p>Upload an image file to extract text:</p>
+        <p>Upload an image or PDF file to extract text:</p>
         <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept="image/*">
+            <input type="file" name="file" accept=".png,.jpg,.jpeg,.gif,.tif,.tiff,.bmp,.pdf">
+            <div class="file-info">Supported file types: {allowed_ext_str}</div>
             <input type="submit" value="Extract Text" class="button">
         </form>
     </body>
     </html>
     """
 
-def get_result_html(text, app_title, company_name, logo_path):
+def get_result_html(text, app_title, company_name, logo_path, filename):
     """Return the HTML for the results page"""
     return f"""
     <!DOCTYPE html>
@@ -96,13 +109,29 @@ def get_result_html(text, app_title, company_name, logo_path):
         <style>
             {get_base_css()}
         </style>
+        <script>
+            function saveTextToFile() {{
+                const text = document.getElementById('extracted-text').innerText;
+                const blob = new Blob([text], {{ type: 'text/plain' }});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'extracted_text.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }}
+        </script>
     </head>
     <body>
         {get_header_html(f"{app_title} Result", logo_path)}
         
-        <h2>Extracted Text:</h2>
-        <pre>{text}</pre>
-        <a href="/" class="button">Back to Upload</a>
+        <h2>File Processed: {filename}</h2>
+        <h3>Extracted Text:</h3>
+        <pre id="extracted-text">{text}</pre>
+        <div>
+            <a href="/" class="button">Back to Upload</a>
+            <button onclick="saveTextToFile()" class="button save-button">Save Text to File</button>
+        </div>
     </body>
     </html>
     """

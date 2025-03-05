@@ -31,7 +31,7 @@ def get_footer_html():
     return '''
     <div class="footer">
         <div class="footer-logo">
-            <img src="/static/logo.png" alt="Alchemy Cloud Logo">
+            <img src="/static/Alchemy-logo.svg" alt="Alchemy Cloud Logo">
         </div>
         <div class="copyright">
             © Alchemy Cloud, Inc. All Rights Reserved.

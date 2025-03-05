@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, send_from_directory
 import os
 import pytesseract
 from PIL import Image
@@ -15,11 +15,30 @@ import PyPDF2
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(app.static_folder, filename)
 
 # Configuration
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Add this function after app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+def get_footer_html():
+    return '''
+    <div class="footer">
+        <div class="footer-logo">
+            <img src="/static/alchemy-logo.png" alt="Alchemy Cloud Logo">
+        </div>
+        <div class="copyright">
+            © Alchemy Cloud, Inc. All Rights Reserved.
+        </div>
+    </div>
+    '''
+
 
 # Alchemy API Configuration
 ALCHEMY_REFRESH_TOKEN = os.getenv('ALCHEMY_REFRESH_TOKEN')
@@ -84,6 +103,21 @@ HTML_TEMPLATE = '''
             align-items: center;
             margin-bottom: 20px;
         }
+        .footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+    text-align: center;
+       }
+        .footer-logo img {
+    height: 80px;
+    opacity: 0.15;
+    margin-bottom: 10px;
+        }
+        .copyright {
+    font-size: 12px;
+    color: #999;
+       }
     </style>
 </head>
 <body>
@@ -402,6 +436,7 @@ HTML_TEMPLATE = '''
             });
         });
     </script>
+    ''' + get_footer_html() + '''
 </body>
 </html>
 '''

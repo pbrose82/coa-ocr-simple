@@ -124,7 +124,7 @@ HTML_TEMPLATE = '''
     <div class="container">
         <div class="header">
             
-            <h1 class="mb-0">COA OCR to Alchemy</h1>
+            <h1 class="mb-0">Alchemy COA Intelligence</h1>
         </div>
         
         <div class="alert alert-info">

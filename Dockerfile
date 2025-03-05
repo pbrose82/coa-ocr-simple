@@ -1,12 +1,12 @@
 FROM python:3.9-slim
 
-# Install Tesseract OCR and Poppler (needed for PDF processing)
+# Install Tesseract OCR
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
-    libtesseract-dev \
-    poppler-utils \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
 
 # Copy requirements first for better caching
@@ -14,12 +14,17 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY app.py config.py templates.py ./
+COPY static/ ./static/
 
-# Make port 5000 available
+# Create uploads directory
+RUN mkdir -p uploads
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Expose port
 EXPOSE 5000
 
-# Run the application with extended timeout
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "300", "--workers", "1", "app:app"]
-
-
+# Run the application
+CMD ["python", "app.py"]

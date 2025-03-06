@@ -19,17 +19,17 @@ body {
     margin: 0;
 }
 
+/* Updated tips section to be centered */
 .tips-section {
     background-color: #ddf1ff;
     padding: 20px;
-    display: flex;
-    align-items: center;
+    text-align: center; /* Center the text */
 }
 
-.tips-icon {
-    color: #8bc4ea;
-    font-size: 2.5rem;
-    margin-right: 20px;
+.tips-content {
+    display: inline-block;
+    text-align: left; /* Keep the list items text-aligned left */
+    margin: 0 auto; /* Center the content */
 }
 
 .tips-content strong {
@@ -41,6 +41,7 @@ body {
 .tips-content ul {
     margin: 0;
     padding-left: 20px;
+    display: inline-block; /* Allows centering while keeping bullet points */
 }
 
 .tips-content li {
@@ -48,9 +49,12 @@ body {
     color: #555;
 }
 
+/* Center the main content */
 .main-content {
     padding: 30px;
     flex: 1;
+    max-width: 800px; /* Limit the width */
+    margin: 0 auto; /* Center the content */
 }
 
 .upload-section {
@@ -81,20 +85,36 @@ body {
     border-radius: 4px;
 }
 
+/* Updated file upload section */
 .file-upload {
     border: 2px dashed #ddd;
     border-radius: 5px;
-    padding: 30px;
+    padding: 50px 30px; /* More vertical padding */
     text-align: center;
     background-color: #f9f9f9;
     margin-bottom: 20px;
     position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
 }
 
 .file-upload-icon {
     font-size: 3rem;
     color: #ddd;
-    margin-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+.custom-file-upload {
+    border: 1px solid #ccc;
+    display: inline-block;
+    padding: 6px 12px;
+    cursor: pointer;
+    background-color: #fff;
+    color: #2196F3;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .file-info {
@@ -134,17 +154,6 @@ body {
 .copyright {
     color: #aaa;
     font-size: 12px;
-}
-
-/* For custom file input */
-.custom-file-upload {
-    border: 1px solid #ccc;
-    display: inline-block;
-    padding: 6px 12px;
-    cursor: pointer;
-    background-color: #f8f8f8;
-    color: #2196F3;
-    border-radius: 4px;
 }
 
 input[type="file"] {

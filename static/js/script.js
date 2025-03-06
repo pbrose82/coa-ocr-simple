@@ -11,16 +11,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusText = document.getElementById('statusText');
     const progressBar = document.getElementById('progressBar');
     
-    // Display selected filename and update button style
-fileInput.addEventListener('change', function() {
-    if (fileInput.files.length > 0) {
-        fileName.textContent = fileInput.files[0].name;
-        extractButton.classList.add('active');  // Add this line
-    } else {
-        fileName.textContent = '';
-        extractButton.classList.remove('active');  // Add this line
-    }
-});
+    // Display selected filename and update button state
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length > 0) {
+            fileName.textContent = fileInput.files[0].name;
+            extractButton.classList.add('active');
+            
+            // Reset submit button when a new file is selected
+            sendToAlchemy.classList.remove('active');
+            sendToAlchemy.disabled = true;
+            
+            // Re-enable extract button if it was disabled
+            extractButton.classList.remove('disabled');
+            extractButton.disabled = false;
+        } else {
+            fileName.textContent = '';
+            extractButton.classList.remove('active');
+        }
+    });
     
     // Set file input accept attribute based on file type selection
     fileFormat.addEventListener('change', function() {
@@ -57,6 +65,7 @@ fileInput.addEventListener('change', function() {
         rawText.textContent = '';
         results.style.display = 'none';
         sendToAlchemy.disabled = true;
+        sendToAlchemy.classList.remove('active');
         extractedData = null;
         
         // Show processing status
@@ -143,9 +152,14 @@ fileInput.addEventListener('change', function() {
             // Display raw text
             rawText.textContent = data.full_text;
             
-            // Enable send to Alchemy button if we have data to send
+            // Update button states
+            extractButton.classList.add('disabled');
+            extractButton.classList.remove('active');
+            
+            // Enable submit to Alchemy button if we have data to send
             if (data.product_name || data.purity) {
                 sendToAlchemy.disabled = false;
+                sendToAlchemy.classList.add('active');
             }
         })
         .catch(error => {
@@ -166,20 +180,7 @@ fileInput.addEventListener('change', function() {
             alert('No data to send to Alchemy');
             return;
         }
-        // Add this to your existing DOMContentLoaded event listener
-const fileInput = document.getElementById('fileInput');
-const extractButton = document.getElementById('extractButton');
-
-// Update extract button state when file is selected
-fileInput.addEventListener('change', function() {
-    if (fileInput.files.length > 0) {
-        fileName.textContent = fileInput.files[0].name;
-        extractButton.classList.add('active');  // Add blue styling
-    } else {
-        fileName.textContent = '';
-        extractButton.classList.remove('active');  // Remove blue styling
-    }
-});
+        
         // Show processing status
         processingStatus.style.display = 'block';
         statusText.textContent = 'Sending data to Alchemy...';

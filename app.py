@@ -142,14 +142,25 @@ def format_purity_value(purity_string):
     """Extract and format the purity value for Alchemy API"""
     if not purity_string:
         return ""
-        
+    
+    # If purity is a dictionary (from complex parsing)
+    if isinstance(purity_string, dict):
+        return purity_string.get('base_purity', '')
+    
     # Remove any % signs
     purity_string = purity_string.replace('%', '').strip()
     
     # Try to extract the first number (e.g., get "99.95" from "99.95 ± 0.02")
     parts = purity_string.split()
-    if parts:
-        return parts[0].strip()
+    
+    # If parts contain a number, return the first numeric part
+    for part in parts:
+        try:
+            # Convert to float to ensure it's a number
+            float(part)
+            return part
+        except ValueError:
+            continue
     
     return purity_string
 
@@ -159,6 +170,13 @@ def parse_coa_data(text):
     
     # Preprocess text for better table handling
     preprocessed_text = preprocess_text_for_tables(text)
+    
+    # Additional specific patterns for this type of CoA
+    additional_patterns = {
+        "hs_code": r"HS\s+Code:\s*(\d+)",
+        "date_of_issue": r"Date\s+of\s+Issue:\s*(\d{2}\.\d{2}\.\d{2})",
+        "molecular_formula": r"(?:Propan-2-one|Dimethyl\s+ketone)\s*\(([A-Za-z0-9]+)\)",
+    }
     
     # Determine document type first
     if re.search(r"Technical\s+Data\s+Sheet", preprocessed_text, re.IGNORECASE):
@@ -219,20 +237,38 @@ def parse_coa_data(text):
                 elif match:
                     data[key] = match.group(0).strip()
         
-        # Additional fallback pattern for purity that's more flexible
-        if "purity" not in data or not data["purity"]:
-            purity_patterns = [
-                r"(\d{2,3}\.\d{1,2}\s*[±\+\-]\s*\d{1,2}\.\d{1,2}\s*%)",
-                r"Certified\s+puri[^\:]*:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*[%o])",
-                r"purity:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
-                r"Det\.\s+Purity:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)"
-            ]
-            
-            for pattern in purity_patterns:
-                match = re.search(pattern, preprocessed_text, re.IGNORECASE)
-                if match:
+        # Extract additional specific details
+        for key, pattern in additional_patterns.items():
+            match = re.search(pattern, preprocessed_text, re.IGNORECASE)
+            if match:
+                if match.groups():
+                    data[key] = match.group(1).strip()
+                else:
+                    data[key] = match.group(0).strip()
+        
+        # Enhanced purity extraction for complex purity representations
+        purity_patterns = [
+            # Pattern to capture multiple purity components
+            r"Purity\s*ASTM\s*D\s*3545\s*%\s*wt\s*(\d+)\s*((?:[\d\.]+\s*[A-Z]+\s*)+)",
+            # Fallback patterns
+            r"(\d{2,3}\.\d{1,2}\s*[±\+\-]\s*\d{1,2}\.\d{1,2}\s*%)",
+            r"Certified\s+puri[^\:]*:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*[%o])",
+            r"purity:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
+            r"Det\.\s+Purity:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)"
+        ]
+        
+        for pattern in purity_patterns:
+            match = re.search(pattern, preprocessed_text, re.IGNORECASE)
+            if match:
+                # For complex multi-component purity, store both the base purity and components
+                if len(match.groups()) > 1:
+                    data["purity"] = {
+                        "base_purity": match.group(1).strip(),
+                        "components": [comp.strip() for comp in match.group(2).split()]
+                    }
+                else:
                     data["purity"] = match.group(1).strip()
-                    break
+                break
         
         # Extract data from tables - look for test/result pairs
         test_result_pattern = r"(?:Test|Parameter)(?:\s+Method)?(?:\s+Units)?(?:\s+(?:Specification|Limits))?\s+Results"

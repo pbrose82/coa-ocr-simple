@@ -7,19 +7,20 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy requirements and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy application files
+COPY app.py .
+COPY static/ static/
+COPY templates/ templates/
 
-# Make port 5000 available
+# Expose port
 EXPOSE 5000
 
-# Run the application with extended timeout
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "300", "--workers", "1", "app:app"]
-
-
+# Run the application
+CMD ["python", "app.py"]

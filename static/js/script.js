@@ -11,14 +11,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusText = document.getElementById('statusText');
     const progressBar = document.getElementById('progressBar');
     
-    // Display selected filename
-    fileInput.addEventListener('change', function() {
-        if (fileInput.files.length > 0) {
-            fileName.textContent = fileInput.files[0].name;
-        } else {
-            fileName.textContent = '';
-        }
-    });
+    // Display selected filename and update button style
+fileInput.addEventListener('change', function() {
+    if (fileInput.files.length > 0) {
+        fileName.textContent = fileInput.files[0].name;
+        extractButton.classList.add('active');  // Add this line
+    } else {
+        fileName.textContent = '';
+        extractButton.classList.remove('active');  // Add this line
+    }
+});
     
     // Set file input accept attribute based on file type selection
     fileFormat.addEventListener('change', function() {

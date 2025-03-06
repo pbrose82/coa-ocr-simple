@@ -485,7 +485,7 @@ def send_to_alchemy():
                                 "row": 0,
                                 "values": [
                                     {
-                                        "value": extracted_data.get('lot_number', ""),
+                                        "value": extracted_data.get('hs_code', extracted_data.get('lot_number', "")),
                                         "valuePreview": ""
                                     }
                                 ]

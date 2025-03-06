@@ -363,8 +363,7 @@ def send_to_alchemy():
     
     try:
         # Extract the data received from the client
-        extracted_data
-        = data.get('data', {})
+        extracted_data = data.get('data', {})
         
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))

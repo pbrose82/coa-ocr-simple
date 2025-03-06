@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const alchemyRecordLink = document.getElementById('alchemyRecordLink');
     const recordLink = document.getElementById('recordLink');
     const resetButton = document.getElementById('resetButton');
-    const uploadArea = document.querySelector('.upload-area') || document.getElementById('dropZone');
+    const uploadArea = document.querySelector('.file-upload') || document.getElementById('dropZone');
     
     // Reset button - refresh the entire page
     resetButton.addEventListener('click', function() {
@@ -47,11 +47,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (fileInput.files.length > 0) {
             fileName.textContent = fileInput.files[0].name;
             extractButton.classList.add('active');
-            uploadArea.classList.add('file-selected');
+            
+            // Add the file-selected class to the upload area if it exists
+            if (uploadArea) {
+                uploadArea.classList.add('file-selected');
+            }
         } else {
             fileName.textContent = '';
             extractButton.classList.remove('active');
-            uploadArea.classList.remove('file-selected');
+            
+            // Remove the file-selected class from the upload area if it exists
+            if (uploadArea) {
+                uploadArea.classList.remove('file-selected');
+            }
         }
     });
     
@@ -164,16 +172,52 @@ document.addEventListener('DOMContentLoaded', function() {
             // Display results
             results.style.display = 'block';
             
-            // Display extracted data in table
+            // Create header row with sections
+            const headerRow = document.createElement('tr');
+            headerRow.innerHTML = '<td colspan="2" class="table-primary"><strong>General Information</strong></td>';
+            dataTable.appendChild(headerRow);
+            
+            // Display extracted data in table - main fields first
+            const priorityFields = ['product_name', 'cas_number', 'batch_number', 'product_number', 'purity', 'hs_code'];
+            
+            // Add the priority fields first
+            priorityFields.forEach(field => {
+                if (data[field]) {
+                    addDataRow(field, data[field]);
+                }
+            });
+            
+            // Then add any other fields (excluding full_text and test_results)
             for (const [key, value] of Object.entries(data)) {
-                if (key !== 'full_text') {
+                if (key !== 'full_text' && key !== 'test_results' && !priorityFields.includes(key)) {
+                    addDataRow(key, value);
+                }
+            }
+            
+            // Add test results section if available
+            if (data.test_results && data.test_results.length > 0) {
+                // Add a header for test results
+                const testHeaderRow = document.createElement('tr');
+                testHeaderRow.innerHTML = '<td colspan="2" class="table-primary"><strong>Test Results</strong></td>';
+                dataTable.appendChild(testHeaderRow);
+                
+                // Add a header row for the test columns
+                const testColumnRow = document.createElement('tr');
+                testColumnRow.innerHTML = `
+                    <td><strong>Test Name</strong></td>
+                    <td><strong>Specification / Result</strong></td>
+                `;
+                dataTable.appendChild(testColumnRow);
+                
+                // Add each test result
+                data.test_results.forEach(test => {
                     const row = document.createElement('tr');
                     row.innerHTML = `
-                        <td><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
-                        <td>${value}</td>
+                        <td><strong>${test.test_name}</strong></td>
+                        <td><span class="text-muted">${test.specification}</span> / <span class="text-success">${test.result}</span></td>
                     `;
                     dataTable.appendChild(row);
-                }
+                });
             }
             
             // Display raw text
@@ -185,9 +229,19 @@ document.addEventListener('DOMContentLoaded', function() {
             extractButton.disabled = true;
             
             // Enable submit to Alchemy button if we have data to send
-            if (data.product_name || data.purity) {
+            if (data.product_name || data.purity || (data.test_results && data.test_results.length > 0)) {
                 sendToAlchemy.disabled = false;
                 sendToAlchemy.classList.add('active');
+            }
+            
+            // Helper function to add data rows
+            function addDataRow(key, value) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
+                    <td>${value}</td>
+                `;
+                dataTable.appendChild(row);
             }
         })
         .catch(error => {
@@ -237,6 +291,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.record_url && data.record_id) {
                     recordLink.href = data.record_url;
                     recordLink.textContent = `View record ${data.record_id} in Alchemy`;
+                    if (data.tests_extracted) {
+                        document.querySelector('#alchemyRecordLink .alert-success p:first-child').textContent = 
+                            `Data successfully sent to Alchemy with ${data.tests_extracted} test results!`;
+                    }
                     alchemyRecordLink.style.display = 'block';
                 } else {
                     alert('Data successfully sent to Alchemy!');

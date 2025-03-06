@@ -5,386 +5,102 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Alchemy COA Intelligence</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { 
-            padding-top: 20px; 
-            padding-bottom: 40px;
-        }
-        .container {
-            max-width: 800px;
-        }
-        .result-box {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 5px;
-            background-color: #f8f9fa;
-        }
-        pre {
-            background-color: #f1f1f1;
-            padding: 10px;
-            border-radius: 4px;
-            overflow-x: auto;
-        }
-        .processing-status {
-            display: none;
-            margin-top: 15px;
-            padding: 10px;
-        }
-        .file-type-toggle {
-            margin-bottom: 15px;
-        }
-        .record-link {
-            margin-top: 10px;
-            font-weight: bold;
-        }
-        .logo {
-            max-height: 60px;
-            margin-right: 15px;
-        }
-        .header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            text-align: center;
-        }
-        .footer-logo img {
-            height: 80px;
-            opacity: 0.15;
-            margin-bottom: 10px;
-        }
-        .copyright {
-            font-size: 12px;
-            color: #999;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1 class="mb-0">Alchemy COA Intelligence</h1>
+    <div class="header">
+        <h1>Alchemy COA Intelligence</h1>
+    </div>
+    
+    <div class="tips-section">
+        <div class="tips-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" class="bi bi-clipboard-check" viewBox="0 0 16 16">
+                <path fill-rule="evenodd" d="M10.854 7.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 9.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
+                <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+                <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+            </svg>
         </div>
-        
-        <div class="alert alert-info">
+        <div class="tips-content">
             <strong>Tips for best results:</strong>
-            <ul class="mb-0">
+            <ul>
                 <li>Image files (JPG, PNG) process faster than PDFs</li>
                 <li>PDFs with embedded text work best</li>
                 <li>Use clear, high-resolution images of your COA documents</li>
             </ul>
         </div>
-        
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">Upload COA Document</h5>
+    </div>
+    
+    <div class="main-content">
+        <div class="upload-section">
+            <h2>Upload COA Document</h2>
+            
+            <div class="form-group">
+                <label class="form-label">File Format</label>
+                <select class="form-select" id="fileFormat">
+                    <option value="pdf" selected>PDF</option>
+                    <option value="image">Image (faster)</option>
+                </select>
             </div>
-            <div class="card-body">
-                <div class="file-type-toggle">
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="imageOption" value="image">
-                        <label class="form-check-label" for="imageOption">Image (faster)</label>
+            
+            <div class="form-group">
+                <label class="form-label">Select COA File</label>
+                <div class="file-upload">
+                    <div class="file-upload-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-cloud-arrow-up" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M7.646 5.146a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 6.707V10.5a.5.5 0 0 1-1 0V6.707L6.354 7.854a.5.5 0 1 1-.708-.708l2-2z"/>
+                            <path d="M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383zm.653.757c-.757.653-1.153 1.44-1.153 2.056v.448l-.445.049C2.064 6.805 1 7.952 1 9.318 1 10.785 2.23 12 3.781 12h8.906C13.98 12 15 10.988 15 9.773c0-1.216-1.02-2.228-2.313-2.228h-.5v-.5C12.188 4.825 10.328 3 8 3a4.53 4.53 0 0 0-2.941 1.1z"/>
+                        </svg>
                     </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="fileTypeOptions" id="pdfOption" value="pdf" checked>
-                        <label class="form-check-label" for="pdfOption">PDF</label>
-                    </div>
+                    <label for="fileInput" class="custom-file-upload">CHOOSE FILE</label>
+                    <input type="file" id="fileInput" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
+                    <div id="fileName"></div>
                 </div>
                 
-                <form id="uploadForm" enctype="multipart/form-data" class="mb-3">
-                    <div class="mb-3">
-                        <label for="file" class="form-label">Select COA file</label>
-                        <input class="form-control" type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
-                        <div class="form-text text-muted" id="fileTypeHelp">
-                            Images process faster. Select file type above to change accepted formats.
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Extract Data</button>
-                </form>
-                
-                <div id="processingStatus" class="alert alert-info processing-status">
-                    <div class="d-flex align-items-center">
-                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                        <span id="statusText">Processing your document...</span>
-                    </div>
-                    <div class="progress mt-2" style="height: 5px;">
-                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
-                    </div>
+                <div class="file-info">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle" viewBox="0 0 16 16">
+                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                        <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                    </svg>
+                    Images process faster. Select file type above to change accepted formats.
                 </div>
-                
-                <div id="alchemyAlerts" class="mt-3" style="display: none;">
-                    <div class="alert alert-success" id="successAlert" style="display: none;">
-                        <div>Data successfully sent to Alchemy!</div>
-                        <div class="record-link">
-                            <a href="#" id="recordLink" target="_blank">View record in Alchemy</a>
-                        </div>
-                    </div>
-                    <div class="alert alert-danger" id="errorAlert" style="display: none;">
-                        <span id="errorMessage">Error sending data to Alchemy</span>
-                    </div>
-                </div>
-                
-                <div id="results" class="result-box" style="display: none;">
-                    <h5>Extracted Data:</h5>
-                    <div class="d-flex justify-content-end mb-3">
-                        <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
-                    </div>
-                    <table class="table table-bordered">
-                        <tbody id="dataTable">
-                            <!-- Data will be inserted here -->
-                        </tbody>
-                    </table>
-                    
-                    <div class="mt-4">
-                        <h5>Raw Text:</h5>
-                        <pre id="rawText" style="max-height: 200px; overflow-y: auto;"></pre>
-                    </div>
-                </div>
+            </div>
+            
+            <button id="extractButton" class="btn-extract">EXTRACT DATA</button>
+        </div>
+        
+        <div id="processingStatus" style="display: none;" class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                <span id="statusText">Processing your document...</span>
+            </div>
+            <div class="progress mt-2" style="height: 5px;">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div id="results" style="display: none;" class="result-box">
+            <h5>Extracted Data:</h5>
+            <div class="d-flex justify-content-end mb-3">
+                <button id="sendToAlchemy" class="btn btn-success" disabled>Send to Alchemy</button>
+            </div>
+            <table class="table table-bordered">
+                <tbody id="dataTable">
+                    <!-- Data will be inserted here -->
+                </tbody>
+            </table>
+            
+            <div class="mt-4">
+                <h5>Raw Text:</h5>
+                <pre id="rawText" style="max-height: 200px; overflow-y: auto;"></pre>
             </div>
         </div>
     </div>
     
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const uploadForm = document.getElementById('uploadForm');
-            const fileInput = document.getElementById('file');
-            const results = document.getElementById('results');
-            const dataTable = document.getElementById('dataTable');
-            const rawText = document.getElementById('rawText');
-            const sendToAlchemy = document.getElementById('sendToAlchemy');
-            const processingStatus = document.getElementById('processingStatus');
-            const statusText = document.getElementById('statusText');
-            const progressBar = document.getElementById('progressBar');
-            const imageOption = document.getElementById('imageOption');
-            const pdfOption = document.getElementById('pdfOption');
-            const alchemyAlerts = document.getElementById('alchemyAlerts');
-            const successAlert = document.getElementById('successAlert');
-            const errorAlert = document.getElementById('errorAlert');
-            const errorMessage = document.getElementById('errorMessage');
-            const recordLink = document.getElementById('recordLink');
-            
-            // Set file input accept attribute based on file type selection
-            imageOption.addEventListener('change', () => {
-                if (imageOption.checked) {
-                    fileInput.accept = ".jpg,.jpeg,.png,.tiff";
-                }
-            });
-            
-            pdfOption.addEventListener('change', () => {
-                if (pdfOption.checked) {
-                    fileInput.accept = ".pdf";
-                }
-            });
-            
-            let extractedData = null;
-            let processingTimeout;
-            
-            uploadForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                const file = fileInput.files[0];
-                
-                if (!file) {
-                    alert('Please select a file');
-                    return;
-                }
-                
-                // Check if file type matches selected option
-                const isPdf = file.name.toLowerCase().endsWith('.pdf');
-                const isImage = !isPdf;
-                
-                if ((imageOption.checked && isPdf) || (pdfOption.checked && isImage)) {
-                    const expectedType = imageOption.checked ? "image" : "PDF";
-                    alert(`You selected ${expectedType} file type but uploaded a ${isPdf ? "PDF" : "image"} file. Please select the correct file type or change your selection.`);
-                    return;
-                }
-                
-                // Clear previous results
-                dataTable.innerHTML = '';
-                rawText.textContent = '';
-                results.style.display = 'none';
-                sendToAlchemy.disabled = true;
-                alchemyAlerts.style.display = 'none';
-                extractedData = null;
-                
-                // Show processing status
-                processingStatus.style.display = 'block';
-                statusText.textContent = 'Uploading document...';
-                progressBar.style.width = '10%';
-                
-                // Clear any existing timeout
-                if (processingTimeout) clearTimeout(processingTimeout);
-                
-                // Set up simulated progress for user feedback
-                let progress = 10;
-                const progressInterval = setInterval(() => {
-                    if (progress < 90) {
-                        progress += Math.random() * 5;
-                        progressBar.style.width = `${progress}%`;
-                        
-                        // Update status text based on progress
-                        if (progress > 20 && progress < 40) {
-                            statusText.textContent = 'Processing document...';
-                        } else if (progress > 40 && progress < 60) {
-                            statusText.textContent = 'Extracting text...';
-                        } else if (progress > 60 && progress < 80) {
-                            statusText.textContent = 'Analyzing data...';
-                        }
-                    }
-                }, 1000);
-                
-                // Set timeout to show warning after 30 seconds
-                processingTimeout = setTimeout(() => {
-                    statusText.textContent = 'Still processing... Please wait';
-                }, 30000);
-                
-                const formData = new FormData();
-                formData.append('file', file);
-                
-                fetch('/extract', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! Status: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Clear intervals and timeouts
-                    clearInterval(progressInterval);
-                    if (processingTimeout) clearTimeout(processingTimeout);
-                    
-                    // Complete progress bar
-                    progressBar.style.width = '100%';
-                    statusText.textContent = 'Processing complete!';
-                    
-                    // Hide processing indicators after a brief delay
-                    setTimeout(() => {
-                        processingStatus.style.display = 'none';
-                    }, 1000);
-                    
-                    if (data.error) {
-                        alert('Error: ' + data.error);
-                        return;
-                    }
-                    
-                    // Save extracted data
-                    extractedData = data;
-                    
-                    // Display results
-                    results.style.display = 'block';
-                    
-                    // Display extracted data in table
-                    for (const [key, value] of Object.entries(data)) {
-                        if (key !== 'full_text') {
-                            const row = document.createElement('tr');
-                            row.innerHTML = `
-                                <td><strong>${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}</strong></td>
-                                <td>${value}</td>
-                            `;
-                            dataTable.appendChild(row);
-                        }
-                    }
-                    
-                    // Display raw text
-                    rawText.textContent = data.full_text;
-                    
-                    // Enable send to Alchemy button if we have data to send
-                    if (data.product_name || data.purity) {
-                        sendToAlchemy.disabled = false;
-                    }
-                })
-                .catch(error => {
-                    // Clear intervals and timeouts
-                    clearInterval(progressInterval);
-                    if (processingTimeout) clearTimeout(processingTimeout);
-                    
-                    // Hide processing indicators
-                    processingStatus.style.display = 'none';
-                    
-                    console.error('Error:', error);
-                    alert('Error processing file. The server might have timed out. For PDFs, try using a smaller file or converting it to an image first.');
-                });
-            });
-            
-            sendToAlchemy.addEventListener('click', function() {
-                if (!extractedData) {
-                    alert('No data to send to Alchemy');
-                    return;
-                }
-                
-                // Show processing status
-                processingStatus.style.display = 'block';
-                statusText.textContent = 'Sending data to Alchemy...';
-                progressBar.style.width = '50%';
-                
-                // Hide previous alerts
-                alchemyAlerts.style.display = 'none';
-                successAlert.style.display = 'none';
-                errorAlert.style.display = 'none';
-                
-                // Format data for Alchemy's expected structure
-                const payload = {
-                    data: extractedData
-                };
-                
-                fetch('/send-to-alchemy', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                })
-                .then(response => response.json())
-                .then(data => {
-                    // Hide processing status
-                    processingStatus.style.display = 'none';
-                    
-                    // Show appropriate alert
-                    alchemyAlerts.style.display = 'block';
-                    if (data.status === 'success') {
-                        successAlert.style.display = 'block';
-                        errorAlert.style.display = 'none';
-                        
-                        // Set record link if available
-                        if (data.record_url) {
-                            recordLink.href = data.record_url;
-                            recordLink.textContent = `View record ${data.record_id} in Alchemy`;
-                        } else {
-                            recordLink.style.display = 'none';
-                        }
-                    } else {
-                        successAlert.style.display = 'none';
-                        errorAlert.style.display = 'block';
-                        errorMessage.textContent = data.message || 'Error sending data to Alchemy';
-                    }
-                })
-                .catch(error => {
-                    // Hide processing status
-                    processingStatus.style.display = 'none';
-                    console.error('Error:', error);
-                    
-                    // Show error alert
-                    alchemyAlerts.style.display = 'block';
-                    successAlert.style.display = 'none';
-                    errorAlert.style.display = 'block';
-                    errorMessage.textContent = error.message || 'Failed to send data to Alchemy';
-                });
-            });
-        });
-    </script>
     <div class="footer">
-        <div class="footer-logo">
-            <img src="/static/alchemy-logo.png" alt="Alchemy Cloud Logo">
-        </div>
-        <div class="copyright">
-            © Alchemy Cloud, Inc. All Rights Reserved.
-        </div>
+        <img src="{{ url_for('static', filename='alchemy-logo.png') }}" alt="Alchemy Cloud Logo" class="footer-logo">
+        <div class="copyright">© ALCHEMY CLOUD, INC. ALL RIGHTS RESERVED.</div>
     </div>
+    
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>

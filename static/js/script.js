@@ -164,7 +164,20 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('No data to send to Alchemy');
             return;
         }
-        
+        // Add this to your existing DOMContentLoaded event listener
+const fileInput = document.getElementById('fileInput');
+const extractButton = document.getElementById('extractButton');
+
+// Update extract button state when file is selected
+fileInput.addEventListener('change', function() {
+    if (fileInput.files.length > 0) {
+        fileName.textContent = fileInput.files[0].name;
+        extractButton.classList.add('active');  // Add blue styling
+    } else {
+        fileName.textContent = '';
+        extractButton.classList.remove('active');  // Remove blue styling
+    }
+});
         // Show processing status
         processingStatus.style.display = 'block';
         statusText.textContent = 'Sending data to Alchemy...';

@@ -33,6 +33,41 @@ def format_purity_value(purity_string):
                 continue
     
     # Fallback - convert to string and strip
+    return str(purity_string).replace('%', '').strip()def format_purity_value(purity_string):
+    """Extract and format the purity value for Alchemy API"""
+    if not purity_string:
+        return ""
+    
+    # If purity is a dictionary (from complex parsing)
+    if isinstance(purity_string, dict):
+        # Prefer base_purity if available
+        if 'base_purity' in purity_string:
+            # Remove % and any whitespace, convert to string
+            return str(purity_string['base_purity']).replace('%', '').strip()
+        # If no base_purity, try to extract first numeric value
+        for value in purity_string.values():
+            if isinstance(value, (int, float, str)):
+                # Convert to string, remove %, strip whitespace
+                return str(value).replace('%', '').strip()
+        # Fallback
+        return str(purity_string)
+    
+    # If it's a string
+    if isinstance(purity_string, str):
+        # Remove % sign and extra whitespace
+        purity_string = purity_string.replace('%', '').strip()
+        
+        # Try to extract the first numeric value
+        parts = purity_string.split()
+        for part in parts:
+            try:
+                # Convert to float to ensure it's a number
+                float(part)
+                return part
+            except ValueError:
+                continue
+    
+    # Fallback - convert to string and strip
     return str(purity_string).replace('%', '').strip()from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
 import pytesseract

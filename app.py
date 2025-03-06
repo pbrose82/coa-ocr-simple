@@ -102,6 +102,23 @@ def refresh_alchemy_token():
         logging.error(f"Error refreshing Alchemy token: {str(e)}")
         return None
 
+def preprocess_text_for_tables(text):
+    """Preprocess text to better handle table structures"""
+    # Replace multiple spaces with single tabs in table-like areas
+    lines = text.split('\n')
+    processed_lines = []
+    
+    for line in lines:
+        # Check if line looks like it could be part of a table (has multiple spaces)
+        if re.search(r"\s{3,}", line):
+            # Replace groups of spaces with tabs
+            processed_line = re.sub(r"\s{3,}", "\t", line)
+            processed_lines.append(processed_line)
+        else:
+            processed_lines.append(line)
+    
+    return "\n".join(processed_lines)
+
 def extract_text_from_pdf_without_ocr(pdf_path):
     """Try to extract text directly from PDF without OCR"""
     try:
@@ -140,8 +157,11 @@ def parse_coa_data(text):
     """Parse data from text for both COAs and technical data sheets"""
     data = {}
     
+    # Preprocess text for better table handling
+    preprocessed_text = preprocess_text_for_tables(text)
+    
     # Determine document type first
-    if re.search(r"Technical\s+Data\s+Sheet", text, re.IGNORECASE):
+    if re.search(r"Technical\s+Data\s+Sheet", preprocessed_text, re.IGNORECASE):
         data["document_type"] = "Technical Data Sheet"
         
         # Technical Data Sheet specific patterns
@@ -154,7 +174,7 @@ def parse_coa_data(text):
         
         # Extract data using tech sheet patterns
         for key, pattern in tech_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, preprocessed_text, re.IGNORECASE)
             if match:
                 # Some patterns capture the whole match, others capture a group
                 if key == "product_name" and match.group(1):
@@ -169,7 +189,7 @@ def parse_coa_data(text):
         
         # COA specific patterns with improved patterns
         coa_patterns = {
-            # Look for BENZENE specifically or other common chemical names
+            # Look for specific chemical names
             "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM)",
             
             # More flexible purity patterns to catch various formats
@@ -192,7 +212,7 @@ def parse_coa_data(text):
         
         # Extract data using COA patterns
         for key, pattern in coa_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, preprocessed_text, re.IGNORECASE)
             if match:
                 if key != "product_name" and match.groups():
                     data[key] = match.group(1).strip()
@@ -209,26 +229,36 @@ def parse_coa_data(text):
             ]
             
             for pattern in purity_patterns:
-                match = re.search(pattern, text, re.IGNORECASE)
+                match = re.search(pattern, preprocessed_text, re.IGNORECASE)
                 if match:
                     data["purity"] = match.group(1).strip()
                     break
+        
+        # Extract data from tables - look for test/result pairs
+        test_result_pattern = r"(?:Test|Parameter)(?:\s+Method)?(?:\s+Units)?(?:\s+(?:Specification|Limits))?\s+Results"
+        if re.search(test_result_pattern, preprocessed_text, re.IGNORECASE):
+            # Find table rows by looking for test names followed by results
+            table_rows = re.findall(r"([A-Za-z][A-Za-z\s\(\)\-\@]+)(?:(?:\s+[A-Z]+\s+[A-Z]\s+\d+)|(?:\s+Visual)|(?:\s+[A-Za-z\s]+))(?:\s+[a-z/]+)?(?:\s+[\d\.\-]+)?(?:\s+[\d\.\-]+)?\s+((?:[\d\.]+|(?:Colorless,\s+Clear\s+liquid)|(?:\d+\.\d+\s*[A-Z]+))(?:\s+[A-Za-z\s,]+)?)", preprocessed_text)
+            
+            for test, result in table_rows:
+                test_name = test.strip().lower().replace(" ", "_")
+                data[test_name] = result.strip()
     
     # Fallback for product name extraction if not found with specific patterns
     if "product_name" not in data or not data["product_name"] or data["product_name"].lower() == "page":
         # Specifically look for BENZENE in the document
-        benzene_match = re.search(r"BENZENE", text, re.IGNORECASE)
+        benzene_match = re.search(r"BENZENE", preprocessed_text, re.IGNORECASE)
         if benzene_match:
             data["product_name"] = "BENZENE"
         else:
             # Try to find a proper product name in the document
             product_line_pattern = r"Reference\s+Material\s+No\.[^\n]+\n+([A-Z]+)"
-            match = re.search(product_line_pattern, text, re.IGNORECASE)
+            match = re.search(product_line_pattern, preprocessed_text, re.IGNORECASE)
             if match:
                 data["product_name"] = match.group(1).strip()
             else:
                 # Look for any capitalized text that might be a product name
-                lines = text.split('\n')
+                lines = preprocessed_text.split('\n')
                 for line in lines:
                     if re.match(r"^[A-Z]{3,}$", line.strip()):
                         data["product_name"] = line.strip()
@@ -237,7 +267,7 @@ def parse_coa_data(text):
     # Additional cleanup for CAS number - make sure it's complete
     if "cas_number" in data and len(data["cas_number"]) < 3:
         # Look for a more complete CAS number pattern
-        cas_match = re.search(r"CAS[^:]*:\s*(?:\[?)([0-9]{1,3}\-[0-9]{2}\-[0-9])", text, re.IGNORECASE)
+        cas_match = re.search(r"CAS[^:]*:\s*(?:\[?)([0-9]{1,3}\-[0-9]{2}\-[0-9])", preprocessed_text, re.IGNORECASE)
         if cas_match:
             data["cas_number"] = cas_match.group(1).strip()
     

@@ -386,36 +386,34 @@ def send_to_alchemy():
                         ]
                     },
                     {
-                        "identifier": "Purity",
-                        "rows": [
-                            {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": purity_value,
-                                        "valuePreview": ""
-                                    }
-                                ]
-                            }
-                        ]
-                    },
+                "identifier": "Purity",
+                "rows": [
                     {
-                        "identifier": "LotNumber",
-                        "rows": [
+                        "row": 0,
+                        "values": [
                             {
-                                "row": 0,
-                                "values": [
-                                    {
-                                        "value": extracted_data.get('hs_code', extracted_data.get('product_number', extracted_data.get('batch_number', ""))),
-                                        "valuePreview": ""
-                                    }
-                                ]
+                                "value": purity_value,
+                                "valuePreview": ""
                             }
                         ]
                     }
                 ]
-            }
-        ]
+            },
+            {
+                "identifier": "LotNumber",
+                "rows": [
+                    {
+                        "row": 0,
+                        "values": [
+                            {
+                                "value": extracted_data.get('hs_code', extracted_data.get('product_number', extracted_data.get('batch_number', ""))),
+                                "valuePreview": ""
+                            }
+                        ]
+                    }
+                        ]
+            }    
+
         
         # Send to Alchemy API
         headers = {

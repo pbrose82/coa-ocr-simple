@@ -102,23 +102,6 @@ def refresh_alchemy_token():
         logging.error(f"Error refreshing Alchemy token: {str(e)}")
         return None
 
-def preprocess_text_for_tables(text):
-    """Preprocess text to better handle table structures"""
-    # Replace multiple spaces with single tabs in table-like areas
-    lines = text.split('\n')
-    processed_lines = []
-    
-    for line in lines:
-        # Check if line looks like it could be part of a table (has multiple spaces)
-        if re.search(r"\s{3,}", line):
-            # Replace groups of spaces with tabs
-            processed_line = re.sub(r"\s{3,}", "\t", line)
-            processed_lines.append(processed_line)
-        else:
-            processed_lines.append(line)
-    
-    return "\n".join(processed_lines)
-
 def extract_text_from_pdf_without_ocr(pdf_path):
     """Try to extract text directly from PDF without OCR"""
     try:
@@ -157,11 +140,8 @@ def parse_coa_data(text):
     """Parse data from text for both COAs and technical data sheets"""
     data = {}
     
-    # Preprocess text for better table handling
-    preprocessed_text = preprocess_text_for_tables(text)
-    
     # Determine document type first
-    if re.search(r"Technical\s+Data\s+Sheet", preprocessed_text, re.IGNORECASE):
+    if re.search(r"Technical\s+Data\s+Sheet", text, re.IGNORECASE):
         data["document_type"] = "Technical Data Sheet"
         
         # Technical Data Sheet specific patterns
@@ -174,7 +154,7 @@ def parse_coa_data(text):
         
         # Extract data using tech sheet patterns
         for key, pattern in tech_patterns.items():
-            match = re.search(pattern, preprocessed_text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 # Some patterns capture the whole match, others capture a group
                 if key == "product_name" and match.group(1):
@@ -189,7 +169,7 @@ def parse_coa_data(text):
         
         # COA specific patterns with improved patterns
         coa_patterns = {
-            # Look for specific chemical names
+            # Look for BENZENE specifically or other common chemical names
             "product_name": r"(?:BENZENE|TOLUENE|XYLENE|ETHYLBENZENE|METHANOL|ETHANOL|ACETONE|CHLOROFORM)",
             
             # More flexible purity patterns to catch various formats
@@ -212,7 +192,7 @@ def parse_coa_data(text):
         
         # Extract data using COA patterns
         for key, pattern in coa_patterns.items():
-            match = re.search(pattern, preprocessed_text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 if key != "product_name" and match.groups():
                     data[key] = match.group(1).strip()
@@ -229,36 +209,26 @@ def parse_coa_data(text):
             ]
             
             for pattern in purity_patterns:
-                match = re.search(pattern, preprocessed_text, re.IGNORECASE)
+                match = re.search(pattern, text, re.IGNORECASE)
                 if match:
                     data["purity"] = match.group(1).strip()
                     break
-        
-        # Extract data from tables - look for test/result pairs
-        test_result_pattern = r"(?:Test|Parameter)(?:\s+Method)?(?:\s+Units)?(?:\s+(?:Specification|Limits))?\s+Results"
-        if re.search(test_result_pattern, preprocessed_text, re.IGNORECASE):
-            # Find table rows by looking for test names followed by results
-            table_rows = re.findall(r"([A-Za-z][A-Za-z\s\(\)\-\@]+)(?:(?:\s+[A-Z]+\s+[A-Z]\s+\d+)|(?:\s+Visual)|(?:\s+[A-Za-z\s]+))(?:\s+[a-z/]+)?(?:\s+[\d\.\-]+)?(?:\s+[\d\.\-]+)?\s+((?:[\d\.]+|(?:Colorless,\s+Clear\s+liquid)|(?:\d+\.\d+\s*[A-Z]+))(?:\s+[A-Za-z\s,]+)?)", preprocessed_text)
-            
-            for test, result in table_rows:
-                test_name = test.strip().lower().replace(" ", "_")
-                data[test_name] = result.strip()
     
     # Fallback for product name extraction if not found with specific patterns
     if "product_name" not in data or not data["product_name"] or data["product_name"].lower() == "page":
         # Specifically look for BENZENE in the document
-        benzene_match = re.search(r"BENZENE", preprocessed_text, re.IGNORECASE)
+        benzene_match = re.search(r"BENZENE", text, re.IGNORECASE)
         if benzene_match:
             data["product_name"] = "BENZENE"
         else:
             # Try to find a proper product name in the document
             product_line_pattern = r"Reference\s+Material\s+No\.[^\n]+\n+([A-Z]+)"
-            match = re.search(product_line_pattern, preprocessed_text, re.IGNORECASE)
+            match = re.search(product_line_pattern, text, re.IGNORECASE)
             if match:
                 data["product_name"] = match.group(1).strip()
             else:
                 # Look for any capitalized text that might be a product name
-                lines = preprocessed_text.split('\n')
+                lines = text.split('\n')
                 for line in lines:
                     if re.match(r"^[A-Z]{3,}$", line.strip()):
                         data["product_name"] = line.strip()
@@ -267,7 +237,7 @@ def parse_coa_data(text):
     # Additional cleanup for CAS number - make sure it's complete
     if "cas_number" in data and len(data["cas_number"]) < 3:
         # Look for a more complete CAS number pattern
-        cas_match = re.search(r"CAS[^:]*:\s*(?:\[?)([0-9]{1,3}\-[0-9]{2}\-[0-9])", preprocessed_text, re.IGNORECASE)
+        cas_match = re.search(r"CAS[^:]*:\s*(?:\[?)([0-9]{1,3}\-[0-9]{2}\-[0-9])", text, re.IGNORECASE)
         if cas_match:
             data["cas_number"] = cas_match.group(1).strip()
     
@@ -308,4 +278,234 @@ def extract():
                 text = extract_text_from_pdf_without_ocr(filepath)
                 
                 if text:
-                    logging.info(f"Successfully extracted text directly from PDF in {time.time() - start
+                    logging.info(f"Successfully extracted text directly from PDF in {time.time() - start_time:.2f} seconds")
+                else:
+                    logging.info("Direct text extraction failed, falling back to OCR")
+                    # Convert PDF to images with highly optimized settings
+                    images = convert_from_path(
+                        filepath,
+                        dpi=100,  # Very low DPI for speed
+                        first_page=1,
+                        last_page=1,  # Only process first page
+                        thread_count=1,  # Single thread to reduce memory
+                        grayscale=True  # Grayscale for faster processing
+                    )
+                    logging.info(f"Converted PDF to {len(images)} images in {time.time() - start_time:.2f} seconds")
+                    
+                    # OCR the first page only
+                    if images:
+                        text = pytesseract.image_to_string(images[0])
+                        logging.info(f"OCR completed in {time.time() - start_time:.2f} seconds")
+                    else:
+                        return jsonify({"error": "Failed to extract pages from PDF"}), 500
+            else:
+                # For image files, process directly
+                logging.info("Processing image file")
+                img = Image.open(filepath)
+                text = pytesseract.image_to_string(img)
+                logging.info(f"Image OCR completed in {time.time() - start_time:.2f} seconds")
+            
+            # Clean up the file
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                logging.warning(f"Failed to remove temp file: {e}")
+            
+            # Parse data with regex
+            parsing_start = time.time()
+            logging.info("Parsing extracted text")
+            data = parse_coa_data(text)
+            logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
+            
+            # Add the full text
+            data['full_text'] = text
+            
+            total_time = time.time() - start_time
+            logging.info(f"Total processing time: {total_time:.2f} seconds")
+            
+            return jsonify(data)
+            
+        except Exception as e:
+            logging.error(f"Error processing file: {e}")
+            # Clean up the file in case of error
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            return jsonify({"error": str(e)}), 500
+    
+    return jsonify({"error": "File type not allowed"}), 400
+
+@app.route('/send-to-alchemy', methods=['POST'])
+def send_to_alchemy():
+    data = request.json
+    
+    if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+    
+    try:
+        # Extract the data received from the client
+        extracted_data = data.get('data', {})
+        
+        # Format purity value - extract just the numeric part
+        purity_value = format_purity_value(extracted_data.get('purity', ""))
+        
+        # Get a fresh access token from Alchemy
+        access_token = refresh_alchemy_token()
+        
+        if not access_token:
+            return jsonify({
+                "status": "error", 
+                "message": "Failed to authenticate with Alchemy API"
+            }), 500
+        
+        # Format data for Alchemy API - exactly matching the Postman structure
+        alchemy_payload = [
+            {
+                "processId": None,
+                "recordTemplate": "exampleParsing",
+                "properties": [
+                    {
+                        "identifier": "RecordName",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "CasNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('cas_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "Purity",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": purity_value,
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "LotNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('lot_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+        
+        # Send to Alchemy API
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
+        response = requests.post(ALCHEMY_API_URL, headers=headers, json=alchemy_payload)
+        
+        # Log response for debugging
+        logging.info(f"Alchemy API response status code: {response.status_code}")
+        logging.info(f"Alchemy API response: {response.text}")
+        
+        # Check if the request was successful
+        response.raise_for_status()
+        
+        # Try to extract the record ID from the response
+        record_id = None
+        record_url = None
+        try:
+            response_data = response.json()
+            # Extract record ID from response - adjust this based on actual response structure
+            if isinstance(response_data, list) and len(response_data) > 0:
+                if 'id' in response_data[0]:
+                    record_id = response_data[0]['id']
+                elif 'recordId' in response_data[0]:
+                    record_id = response_data[0]['recordId']
+            elif isinstance(response_data, dict):
+                if 'id' in response_data:
+                    record_id = response_data['id']
+                elif 'recordId' in response_data:
+                    record_id = response_data['recordId']
+                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                    if 'id' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['id']
+                    elif 'recordId' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['recordId']
+            
+            # If record ID was found, construct the URL
+            if record_id:
+                record_url = f"https://app.alchemy.cloud/productcaseelnlims4uat/record/{record_id}"
+                logging.info(f"Created record URL: {record_url}")
+            
+        except Exception as e:
+            logging.warning(f"Could not extract record ID from response: {e}")
+        
+        # Return success response with record URL if available
+        return jsonify({
+            "status": "success", 
+            "message": "Data successfully sent to Alchemy",
+            "response": response.json() if response.text else {"message": "No content in response"},
+            "record_id": record_id,
+            "record_url": record_url
+        })
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error sending to Alchemy: {e}")
+        
+        # Try to capture response content if available
+        error_response = None
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_response = e.response.json()
+            except:
+                error_response = {"text": e.response.text}
+        
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "details": error_response
+        }), 500
+        
+    except Exception as e:
+        logging.error(f"Error sending to Alchemy: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500
+
+if __name__ == '__main__':
+    # Get port from environment variable or default to 5000
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const alchemyRecordLink = document.getElementById('alchemyRecordLink');
     const recordLink = document.getElementById('recordLink');
     const resetButton = document.getElementById('resetButton');
+    const uploadArea = document.querySelector('.upload-area') || document.getElementById('dropZone');
     
     // Reset button - refresh the entire page
     resetButton.addEventListener('click', function() {
@@ -46,9 +47,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (fileInput.files.length > 0) {
             fileName.textContent = fileInput.files[0].name;
             extractButton.classList.add('active');
+            uploadArea.classList.add('file-selected');
         } else {
             fileName.textContent = '';
             extractButton.classList.remove('active');
+            uploadArea.classList.remove('file-selected');
         }
     });
     
@@ -249,4 +252,68 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Error: ' + (error.message || 'Failed to send data to Alchemy'));
         });
     });
+    
+    // ===== DRAG AND DROP FUNCTIONALITY =====
+    
+    // Only set up drag and drop if the upload area exists
+    if (uploadArea) {
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        // Highlight drop area when item is dragged over it
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, highlight, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, unhighlight, false);
+        });
+        
+        // Handle dropped files
+        uploadArea.addEventListener('drop', handleDrop, false);
+    }
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    function highlight() {
+        uploadArea.classList.add('highlight');
+    }
+    
+    function unhighlight() {
+        uploadArea.classList.remove('highlight');
+    }
+    
+    function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        
+        if (files.length > 0) {
+            fileInput.files = files;
+            
+            // Update the file name display
+            if (fileName) {
+                fileName.textContent = files[0].name;
+            }
+            
+            // Add the file-selected class to the upload area
+            uploadArea.classList.add('file-selected');
+            
+            // Activate the extract button
+            if (extractButton) {
+                extractButton.classList.add('active');
+                extractButton.classList.remove('disabled');
+                extractButton.disabled = false;
+            }
+            
+            // Trigger the change event on the file input to run your existing code
+            const changeEvent = new Event('change', { bubbles: true });
+            fileInput.dispatchEvent(changeEvent);
+        }
+    }
 });

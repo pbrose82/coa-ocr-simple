@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', function() {
+    // DOM elements
     const fileInput = document.getElementById('fileInput');
     const fileName = document.getElementById('fileName');
     const fileFormat = document.getElementById('fileFormat');
@@ -14,8 +15,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const recordLink = document.getElementById('recordLink');
     const resetButton = document.getElementById('resetButton');
     
-    // Function to reset the interface
-    function resetInterface() {
+    // Reset function - completely clears the interface
+    function resetAll() {
         // Clear file input
         fileInput.value = '';
         fileName.textContent = '';
@@ -36,34 +37,37 @@ document.addEventListener('DOMContentLoaded', function() {
         extractedData = null;
     }
     
-   // Display selected filename and update button state
-fileInput.addEventListener('change', function() {
-    // DON'T call resetInterface() here
-    // Instead, do these specific resets:
+    // Reset button click handler
+    resetButton.addEventListener('click', function() {
+        resetAll();
+    });
     
-    // Clear previous results
-    dataTable.innerHTML = '';
-    rawText.textContent = '';
-    results.style.display = 'none';
-    alchemyRecordLink.style.display = 'none';
-    extractedData = null;
+    // File input change handler
+    fileInput.addEventListener('change', function() {
+        // Clear previous results but keep the file
+        dataTable.innerHTML = '';
+        rawText.textContent = '';
+        results.style.display = 'none';
+        alchemyRecordLink.style.display = 'none';
+        extractedData = null;
+        
+        // Reset button states
+        extractButton.classList.remove('disabled');
+        extractButton.disabled = false;
+        sendToAlchemy.classList.remove('active');
+        sendToAlchemy.disabled = true;
+        
+        // Update file name display
+        if (fileInput.files.length > 0) {
+            fileName.textContent = fileInput.files[0].name;
+            extractButton.classList.add('active');
+        } else {
+            fileName.textContent = '';
+            extractButton.classList.remove('active');
+        }
+    });
     
-    // Reset buttons
-    extractButton.classList.remove('disabled');
-    sendToAlchemy.classList.remove('active');
-    sendToAlchemy.disabled = true;
-    
-    // Now handle the file selection
-    if (fileInput.files.length > 0) {
-        fileName.textContent = fileInput.files[0].name;
-        extractButton.classList.add('active');
-    } else {
-        fileName.textContent = '';
-        extractButton.classList.remove('active');
-    }
-});
-    
-    // Set file input accept attribute based on file type selection
+    // File format change handler
     fileFormat.addEventListener('change', function() {
         if (fileFormat.value === 'image') {
             fileInput.accept = ".jpg,.jpeg,.png,.tiff";
@@ -75,6 +79,7 @@ fileInput.addEventListener('change', function() {
     let extractedData = null;
     let processingTimeout;
     
+    // Extract button click handler
     extractButton.addEventListener('click', function() {
         const file = fileInput.files[0];
         
@@ -97,9 +102,9 @@ fileInput.addEventListener('change', function() {
         dataTable.innerHTML = '';
         rawText.textContent = '';
         results.style.display = 'none';
+        alchemyRecordLink.style.display = 'none';
         sendToAlchemy.disabled = true;
         sendToAlchemy.classList.remove('active');
-        alchemyRecordLink.style.display = 'none';
         extractedData = null;
         
         // Show processing status
@@ -189,6 +194,7 @@ fileInput.addEventListener('change', function() {
             // Update button states
             extractButton.classList.add('disabled');
             extractButton.classList.remove('active');
+            extractButton.disabled = true;
             
             // Enable submit to Alchemy button if we have data to send
             if (data.product_name || data.purity) {
@@ -209,6 +215,7 @@ fileInput.addEventListener('change', function() {
         });
     });
     
+    // Send to Alchemy button click handler
     sendToAlchemy.addEventListener('click', function() {
         if (!extractedData) {
             alert('No data to send to Alchemy');

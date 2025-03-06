@@ -1,4 +1,4 @@
- body { 
+body { 
     padding: 0;
     margin: 0;
     font-family: Arial, sans-serif;
@@ -19,17 +19,17 @@
     margin: 0;
 }
 
-/* Updated tips section to be centered */
+/* Tips section - centered */
 .tips-section {
     background-color: #ddf1ff;
     padding: 20px;
-    text-align: center; /* Center the text */
+    text-align: center;
 }
 
 .tips-content {
     display: inline-block;
-    text-align: left; /* Keep the list items text-aligned left */
-    margin: 0 auto; /* Center the content */
+    text-align: left;
+    margin: 0 auto;
 }
 
 .tips-content strong {
@@ -41,7 +41,7 @@
 .tips-content ul {
     margin: 0;
     padding-left: 20px;
-    display: inline-block; /* Allows centering while keeping bullet points */
+    display: inline-block;
 }
 
 .tips-content li {
@@ -49,12 +49,12 @@
     color: #555;
 }
 
-/* Center the main content */
+/* Main content - centered */
 .main-content {
     padding: 30px;
     flex: 1;
-    max-width: 800px; /* Limit the width */
-    margin: 0 auto; /* Center the content */
+    max-width: 800px;
+    margin: 0 auto;
 }
 
 .upload-section {
@@ -85,11 +85,11 @@
     border-radius: 4px;
 }
 
-/* Updated file upload section */
+/* File upload area */
 .file-upload {
     border: 2px dashed #ddd;
     border-radius: 5px;
-    padding: 50px 30px; /* More vertical padding */
+    padding: 50px 30px;
     text-align: center;
     background-color: #f9f9f9;
     margin-bottom: 20px;
@@ -129,24 +129,56 @@
     color: #8bc4ea;
 }
 
+/* Button group for the two buttons */
+.button-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+/* Extract data button */
 .btn-extract {
-    background-color: #e9ecef;  /* Default gray color */
+    background-color: #e9ecef;
     color: #555;
     border: none;
     padding: 8px 20px;
     border-radius: 4px;
     cursor: pointer;
-    transition: all 0.3s ease;  /* Smooth transition effect */
+    transition: all 0.3s ease;
 }
 
 .btn-extract.active {
-    background-color: #2196F3;  /* Blue color when active */
+    background-color: #2196F3;
     color: white;
 }
 
-/* Optional: add a hover effect */
-.btn-extract:hover {
-    opacity: 0.9;
+.btn-extract.disabled {
+    background-color: #e9ecef;
+    color: #aaa;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* Submit to Alchemy button */
+.btn-submit {
+    background-color: #e9ecef;
+    color: #aaa;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 4px;
+    cursor: not-allowed;
+    transition: all 0.3s ease;
+}
+
+.btn-submit.active {
+    background-color: #4CAF50;
+    color: white;
+    cursor: pointer;
+}
+
+.btn-submit:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
 }
 
 .footer {
@@ -182,54 +214,6 @@ input[type="file"] {
     background-color: #ddf1ff;
     border-color: #b8e0ff;
     color: #0c5460;
-}
-.button-group {
-    display: flex;
-    gap: 10px;
-    margin-top: 15px;
-}
-
-.btn-extract {
-    background-color: #e9ecef;
-    color: #555;
-    border: none;
-    padding: 8px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.btn-extract.active {
-    background-color: #2196F3;
-    color: white;
-}
-
-.btn-extract.disabled {
-    background-color: #e9ecef;
-    color: #aaa;
-    cursor: not-allowed;
-    opacity: 0.7;
-}
-
-.btn-submit {
-    background-color: #e9ecef;
-    color: #aaa;
-    border: none;
-    padding: 8px 20px;
-    border-radius: 4px;
-    cursor: not-allowed;
-    transition: all 0.3s ease;
-}
-
-.btn-submit.active {
-    background-color: #4CAF50;
-    color: white;
-    cursor: pointer;
-}
-
-.btn-submit:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
 }
 
 .progress-bar {

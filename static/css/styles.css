@@ -130,12 +130,23 @@ body {
 }
 
 .btn-extract {
-    background-color: #e9ecef;
+    background-color: #e9ecef;  /* Default gray color */
     color: #555;
     border: none;
     padding: 8px 20px;
     border-radius: 4px;
     cursor: pointer;
+    transition: all 0.3s ease;  /* Smooth transition effect */
+}
+
+.btn-extract.active {
+    background-color: #2196F3;  /* Blue color when active */
+    color: white;
+}
+
+/* Optional: add a hover effect */
+.btn-extract:hover {
+    opacity: 0.9;
 }
 
 .footer {

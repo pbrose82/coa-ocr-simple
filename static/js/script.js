@@ -36,19 +36,32 @@ document.addEventListener('DOMContentLoaded', function() {
         extractedData = null;
     }
     
-    // Reset button event listener
-    resetButton.addEventListener('click', resetInterface);
+   // Display selected filename and update button state
+fileInput.addEventListener('change', function() {
+    // DON'T call resetInterface() here
+    // Instead, do these specific resets:
     
-    // Display selected filename and update button state
-    fileInput.addEventListener('change', function() {
-        // Reset the interface before setting new file
-        resetInterface();
-        
-        if (fileInput.files.length > 0) {
-            fileName.textContent = fileInput.files[0].name;
-            extractButton.classList.add('active');
-        }
-    });
+    // Clear previous results
+    dataTable.innerHTML = '';
+    rawText.textContent = '';
+    results.style.display = 'none';
+    alchemyRecordLink.style.display = 'none';
+    extractedData = null;
+    
+    // Reset buttons
+    extractButton.classList.remove('disabled');
+    sendToAlchemy.classList.remove('active');
+    sendToAlchemy.disabled = true;
+    
+    // Now handle the file selection
+    if (fileInput.files.length > 0) {
+        fileName.textContent = fileInput.files[0].name;
+        extractButton.classList.add('active');
+    } else {
+        fileName.textContent = '';
+        extractButton.classList.remove('active');
+    }
+});
     
     // Set file input accept attribute based on file type selection
     fileFormat.addEventListener('change', function() {

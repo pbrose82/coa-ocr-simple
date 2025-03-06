@@ -145,7 +145,11 @@ def format_purity_value(purity_string):
     
     # If purity is a dictionary (from complex parsing)
     if isinstance(purity_string, dict):
-        return purity_string.get('base_purity', '')
+        # Prefer base_purity if available
+        if 'base_purity' in purity_string:
+            return str(purity_string['base_purity'])
+        # If no base_purity, convert the entire dictionary to a string
+        return str(purity_string)
     
     # Remove any % signs
     purity_string = purity_string.replace('%', '').strip()
@@ -249,7 +253,7 @@ def parse_coa_data(text):
         # Enhanced purity extraction for complex purity representations
         purity_patterns = [
             # Pattern to capture multiple purity components
-            r"Purity\s*ASTM\s*D\s*3545\s*%\s*wt\s*(\d+)\s*((?:[\d\.]+\s*[A-Z]+\s*)+)",
+            r"Purity\s*ASTM\s*D\s*3545\s*%\s*wt\s*(\d+)(?:\s*((?:[\d\.]+\s*[A-Z]+\s*)+))?",
             # Fallback patterns
             r"(\d{2,3}\.\d{1,2}\s*[±\+\-]\s*\d{1,2}\.\d{1,2}\s*%)",
             r"Certified\s+puri[^\:]*:\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*[%o])",
@@ -261,7 +265,7 @@ def parse_coa_data(text):
             match = re.search(pattern, preprocessed_text, re.IGNORECASE)
             if match:
                 # For complex multi-component purity, store both the base purity and components
-                if len(match.groups()) > 1:
+                if len(match.groups()) > 1 and match.group(2):
                     data["purity"] = {
                         "base_purity": match.group(1).strip(),
                         "components": [comp.strip() for comp in match.group(2).split()]

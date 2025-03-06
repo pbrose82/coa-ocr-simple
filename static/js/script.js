@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const processingStatus = document.getElementById('processingStatus');
     const statusText = document.getElementById('statusText');
     const progressBar = document.getElementById('progressBar');
+    const alchemyRecordLink = document.getElementById('alchemyRecordLink');
+    const recordLink = document.getElementById('recordLink');
     
     // Display selected filename and update button state
     fileInput.addEventListener('change', function() {
@@ -24,6 +26,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // Re-enable extract button if it was disabled
             extractButton.classList.remove('disabled');
             extractButton.disabled = false;
+            
+            // Hide record link when new file is selected
+            alchemyRecordLink.style.display = 'none';
         } else {
             fileName.textContent = '';
             extractButton.classList.remove('active');
@@ -66,6 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
         results.style.display = 'none';
         sendToAlchemy.disabled = true;
         sendToAlchemy.classList.remove('active');
+        alchemyRecordLink.style.display = 'none';
         extractedData = null;
         
         // Show processing status
@@ -204,11 +210,13 @@ document.addEventListener('DOMContentLoaded', function() {
             processingStatus.style.display = 'none';
             
             if (data.status === 'success') {
-                alert('Data successfully sent to Alchemy!');
-                
-                // Set record link if available
-                if (data.record_url) {
-                    window.open(data.record_url, '_blank');
+                // Display success message and record link
+                if (data.record_url && data.record_id) {
+                    recordLink.href = data.record_url;
+                    recordLink.textContent = `View record ${data.record_id} in Alchemy`;
+                    alchemyRecordLink.style.display = 'block';
+                } else {
+                    alert('Data successfully sent to Alchemy!');
                 }
             } else {
                 alert('Error: ' + (data.message || 'Failed to send data to Alchemy'));

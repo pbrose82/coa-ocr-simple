@@ -15,49 +15,34 @@ document.addEventListener('DOMContentLoaded', function() {
     const recordLink = document.getElementById('recordLink');
     const resetButton = document.getElementById('resetButton');
     
-    // Reset function - completely clears the interface
-    function resetAll() {
-        // Clear file input
-        fileInput.value = '';
-        fileName.textContent = '';
-        
-        // Reset buttons
-        extractButton.classList.remove('active', 'disabled');
-        extractButton.disabled = false;
-        sendToAlchemy.classList.remove('active');
-        sendToAlchemy.disabled = true;
-        
-        // Clear results
-        dataTable.innerHTML = '';
-        rawText.textContent = '';
-        results.style.display = 'none';
-        alchemyRecordLink.style.display = 'none';
-        
-        // Clear data
-        extractedData = null;
-    }
-    
-    // Reset button click handler
+    // Reset button - refresh the entire page
     resetButton.addEventListener('click', function() {
-        resetAll();
+        // This will reload the entire page
+        window.location.reload();
     });
     
     // File input change handler
     fileInput.addEventListener('change', function() {
-        // Clear previous results but keep the file
-        dataTable.innerHTML = '';
-        rawText.textContent = '';
+        // Reset the page state completely when a new file is selected
+        
+        // Hide results section
         results.style.display = 'none';
         alchemyRecordLink.style.display = 'none';
+        
+        // Clear data table and raw text
+        dataTable.innerHTML = '';
+        rawText.textContent = '';
+        
+        // Reset extracted data
         extractedData = null;
         
-        // Reset button states
+        // Update button states
         extractButton.classList.remove('disabled');
         extractButton.disabled = false;
-        sendToAlchemy.classList.remove('active');
         sendToAlchemy.disabled = true;
+        sendToAlchemy.classList.remove('active');
         
-        // Update file name display
+        // Show file name and make extract button blue
         if (fileInput.files.length > 0) {
             fileName.textContent = fileInput.files[0].name;
             extractButton.classList.add('active');

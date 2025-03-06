@@ -19,8 +19,11 @@ COPY app.py .
 COPY static/ static/
 COPY templates/ templates/
 
-# Expose port
+# Expose port - environment variable will override this
 EXPOSE 5000
+
+# Run the application with the correct port
+CMD gunicorn --bind 0.0.0.0:$PORT app:app
 
 # Run the application
 CMD ["python", "app.py"]

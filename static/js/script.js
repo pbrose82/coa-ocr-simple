@@ -1,169 +1,208 @@
-body { 
-    padding: 0;
-    margin: 0;
-    font-family: Arial, sans-serif;
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-}
-
-.header {
-    padding: 20px;
-    text-align: center;
-    border-bottom: 1px solid #e0e0e0;
-}
-
-.header h1 {
-    color: #333;
-    font-size: 2rem;
-    margin: 0;
-}
-
-.tips-section {
-    background-color: #ddf1ff;
-    padding: 20px;
-    display: flex;
-    align-items: center;
-}
-
-.tips-icon {
-    color: #8bc4ea;
-    font-size: 2.5rem;
-    margin-right: 20px;
-}
-
-.tips-content strong {
-    color: #333;
-    display: block;
-    margin-bottom: 10px;
-}
-
-.tips-content ul {
-    margin: 0;
-    padding-left: 20px;
-}
-
-.tips-content li {
-    margin-bottom: 5px;
-    color: #555;
-}
-
-.main-content {
-    padding: 30px;
-    flex: 1;
-}
-
-.upload-section {
-    margin-bottom: 30px;
-}
-
-.upload-section h2 {
-    color: #555;
-    font-size: 1.5rem;
-    margin-bottom: 20px;
-}
-
-.form-group {
-    margin-bottom: 15px;
-}
-
-.form-label {
-    display: block;
-    margin-bottom: 5px;
-    color: #555;
-}
-
-.form-select {
-    width: 100%;
-    max-width: 300px;
-    padding: 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-}
-
-.file-upload {
-    border: 2px dashed #ddd;
-    border-radius: 5px;
-    padding: 30px;
-    text-align: center;
-    background-color: #f9f9f9;
-    margin-bottom: 20px;
-    position: relative;
-}
-
-.file-upload-icon {
-    font-size: 3rem;
-    color: #ddd;
-    margin-bottom: 10px;
-}
-
-.file-info {
-    display: flex;
-    align-items: center;
-    color: #777;
-    margin: 15px 0;
-}
-
-.file-info svg {
-    margin-right: 10px;
-    color: #8bc4ea;
-}
-
-.btn-extract {
-    background-color: #e9ecef;
-    color: #555;
-    border: none;
-    padding: 8px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.footer {
-    margin-top: auto;
-    padding: 30px 0;
-    text-align: center;
-    border-top: 1px solid #e0e0e0;
-}
-
-.footer-logo {
-    max-width: 150px;
-    margin-bottom: 10px;
-    opacity: 0.3;
-}
-
-.copyright {
-    color: #aaa;
-    font-size: 12px;
-}
-
-/* For custom file input */
-.custom-file-upload {
-    border: 1px solid #ccc;
-    display: inline-block;
-    padding: 6px 12px;
-    cursor: pointer;
-    background-color: #f8f8f8;
-    color: #2196F3;
-    border-radius: 4px;
-}
-
-input[type="file"] {
-    display: none;
-}
-
-.result-box {
-    background-color: #f8f9fa;
-    padding: 20px;
-    border-radius: 5px;
-    margin-top: 20px;
-}
-
-.alert-info {
-    background-color: #ddf1ff;
-    border-color: #b8e0ff;
-    color: #0c5460;
-}
-
-.progress-bar {
-    background-color: #8bc4ea;
-}
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const fileFormat = document.getElementById('fileFormat');
+    const extractButton = document.getElementById('extractButton');
+    const results = document.getElementById('results');
+    const dataTable = document.getElementById('dataTable');
+    const rawText = document.getElementById('rawText');
+    const sendToAlchemy = document.getElementById('sendToAlchemy');
+    const processingStatus = document.getElementById('processingStatus');
+    const statusText = document.getElementById('statusText');
+    const progressBar = document.getElementById('progressBar');
+    
+    // Display selected filename
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length > 0) {
+            fileName.textContent = fileInput.files[0].name;
+        } else {
+            fileName.textContent = '';
+        }
+    });
+    
+    // Set file input accept attribute based on file type selection
+    fileFormat.addEventListener('change', function() {
+        if (fileFormat.value === 'image') {
+            fileInput.accept = ".jpg,.jpeg,.png,.tiff";
+        } else {
+            fileInput.accept = ".pdf";
+        }
+    });
+    
+    let extractedData = null;
+    let processingTimeout;
+    
+    extractButton.addEventListener('click', function() {
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            alert('Please select a file');
+            return;
+        }
+        
+        // Check if file type matches selected option
+        const isPdf = file.name.toLowerCase().endsWith('.pdf');
+        const isImage = !isPdf;
+        
+        if ((fileFormat.value === 'image' && isPdf) || (fileFormat.value === 'pdf' && isImage)) {
+            const expectedType = fileFormat.value === 'image' ? "image" : "PDF";
+            alert(`You selected ${expectedType} file type but uploaded a ${isPdf ? "PDF" : "image"} file. Please select the correct file type or change your selection.`);
+            return;
+        }
+        
+        // Clear previous results
+        dataTable.innerHTML = '';
+        rawText.textContent = '';
+        results.style.display = 'none';
+        sendToAlchemy.disabled = true;
+        extractedData = null;
+        
+        // Show processing status
+        processingStatus.style.display = 'block';
+        statusText.textContent = 'Uploading document...';
+        progressBar.style.width = '10%';
+        
+        // Clear any existing timeout
+        if (processingTimeout) clearTimeout(processingTimeout);
+        
+        // Set up simulated progress for user feedback
+        let progress = 10;
+        const progressInterval = setInterval(() => {
+            if (progress < 90) {
+                progress += Math.random() * 5;
+                progressBar.style.width = `${progress}%`;
+                
+                // Update status text based on progress
+                if (progress > 20 && progress < 40) {
+                    statusText.textContent = 'Processing document...';
+                } else if (progress > 40 && progress < 60) {
+                    statusText.textContent = 'Extracting text...';
+                } else if (progress > 60 && progress < 80) {
+                    statusText.textContent = 'Analyzing data...';
+                }
+            }
+        }, 1000);
+        
+        // Set timeout to show warning after 30 seconds
+        processingTimeout = setTimeout(() => {
+            statusText.textContent = 'Still processing... Please wait';
+        }, 30000);
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        fetch('/extract', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Clear intervals and timeouts
+            clearInterval(progressInterval);
+            if (processingTimeout) clearTimeout(processingTimeout);
+            
+            // Complete progress bar
+            progressBar.style.width = '100%';
+            statusText.textContent = 'Processing complete!';
+            
+            // Hide processing indicators after a brief delay
+            setTimeout(() => {
+                processingStatus.style.display = 'none';
+            }, 1000);
+            
+            if (data.error) {
+                alert('Error: ' + data.error);
+                return;
+            }
+            
+            // Save extracted data
+            extractedData = data;
+            
+            // Display results
+            results.style.display = 'block';
+            
+            // Display extracted data in table
+            for (const [key, value] of Object.entries(data)) {
+                if (key !== 'full_text') {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
+                        <td>${value}</td>
+                    `;
+                    dataTable.appendChild(row);
+                }
+            }
+            
+            // Display raw text
+            rawText.textContent = data.full_text;
+            
+            // Enable send to Alchemy button if we have data to send
+            if (data.product_name || data.purity) {
+                sendToAlchemy.disabled = false;
+            }
+        })
+        .catch(error => {
+            // Clear intervals and timeouts
+            clearInterval(progressInterval);
+            if (processingTimeout) clearTimeout(processingTimeout);
+            
+            // Hide processing indicators
+            processingStatus.style.display = 'none';
+            
+            console.error('Error:', error);
+            alert('Error processing file. The server might have timed out. For PDFs, try using a smaller file or converting it to an image first.');
+        });
+    });
+    
+    sendToAlchemy.addEventListener('click', function() {
+        if (!extractedData) {
+            alert('No data to send to Alchemy');
+            return;
+        }
+        
+        // Show processing status
+        processingStatus.style.display = 'block';
+        statusText.textContent = 'Sending data to Alchemy...';
+        progressBar.style.width = '50%';
+        
+        // Format data for Alchemy's expected structure
+        const payload = {
+            data: extractedData
+        };
+        
+        fetch('/send-to-alchemy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Hide processing status
+            processingStatus.style.display = 'none';
+            
+            if (data.status === 'success') {
+                alert('Data successfully sent to Alchemy!');
+                
+                // Set record link if available
+                if (data.record_url) {
+                    window.open(data.record_url, '_blank');
+                }
+            } else {
+                alert('Error: ' + (data.message || 'Failed to send data to Alchemy'));
+            }
+        })
+        .catch(error => {
+            // Hide processing status
+            processingStatus.style.display = 'none';
+            console.error('Error:', error);
+            alert('Error: ' + (error.message || 'Failed to send data to Alchemy'));
+        });
+    });
+});

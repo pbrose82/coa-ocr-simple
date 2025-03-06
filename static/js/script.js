@@ -12,26 +12,41 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressBar = document.getElementById('progressBar');
     const alchemyRecordLink = document.getElementById('alchemyRecordLink');
     const recordLink = document.getElementById('recordLink');
+    const resetButton = document.getElementById('resetButton');
+    
+    // Function to reset the interface
+    function resetInterface() {
+        // Clear file input
+        fileInput.value = '';
+        fileName.textContent = '';
+        
+        // Reset buttons
+        extractButton.classList.remove('active', 'disabled');
+        extractButton.disabled = false;
+        sendToAlchemy.classList.remove('active');
+        sendToAlchemy.disabled = true;
+        
+        // Clear results
+        dataTable.innerHTML = '';
+        rawText.textContent = '';
+        results.style.display = 'none';
+        alchemyRecordLink.style.display = 'none';
+        
+        // Clear data
+        extractedData = null;
+    }
+    
+    // Reset button event listener
+    resetButton.addEventListener('click', resetInterface);
     
     // Display selected filename and update button state
     fileInput.addEventListener('change', function() {
+        // Reset the interface before setting new file
+        resetInterface();
+        
         if (fileInput.files.length > 0) {
             fileName.textContent = fileInput.files[0].name;
             extractButton.classList.add('active');
-            
-            // Reset submit button when a new file is selected
-            sendToAlchemy.classList.remove('active');
-            sendToAlchemy.disabled = true;
-            
-            // Re-enable extract button if it was disabled
-            extractButton.classList.remove('disabled');
-            extractButton.disabled = false;
-            
-            // Hide record link when new file is selected
-            alchemyRecordLink.style.display = 'none';
-        } else {
-            fileName.textContent = '';
-            extractButton.classList.remove('active');
         }
     });
     

@@ -181,6 +181,21 @@ body {
     cursor: not-allowed;
 }
 
+/* Reset button */
+.btn-reset {
+    background-color: #f8f9fa;
+    color: #6c757d;
+    border: 1px solid #dee2e6;
+    padding: 8px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-reset:hover {
+    background-color: #e2e6ea;
+}
+
 .footer {
     margin-top: auto;
     padding: 30px 0;
@@ -218,18 +233,4 @@ input[type="file"] {
 
 .progress-bar {
     background-color: #8bc4ea;
-}
-/* Reset button */
-.btn-reset {
-    background-color: #f8f9fa;
-    color: #6c757d;
-    border: 1px solid #dee2e6;
-    padding: 8px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.btn-reset:hover {
-    background-color: #e2e6ea;
 }

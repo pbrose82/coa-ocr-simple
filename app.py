@@ -1,4 +1,3 @@
-# Import Section
 from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
 import pytesseract
@@ -13,13 +12,16 @@ import time
 from pdf2image import convert_from_path
 import PyPDF2
 
-# Logging Configuration
+# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Flask Application Setup
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
-# Configuration Constants
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(app.static_folder, filename)
+
+# Configuration
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -31,32 +33,29 @@ ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.
 ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
 ALCHEMY_TENANT_NAME = os.getenv('ALCHEMY_TENANT_NAME', 'productcaseelnlims4uat')
 
-# Global Token Cache
+# Token cache with expiration
 alchemy_token_cache = {
     "access_token": None,
     "expires_at": 0  # Unix timestamp when the token expires
 }
 
-# Route Handlers
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    return send_from_directory(app.static_folder, filename)
-
-# Utility Functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def preprocess_text_for_tables(text):
     """Preprocess text to better handle table structures"""
+    # Replace multiple spaces with single tabs in table-like areas
     lines = text.split('\n')
     processed_lines = []
     
     for line in lines:
+        # Check if line looks like it could be part of a table (has multiple spaces)
         if re.search(r"\s{3,}", line):
+            # Replace groups of spaces with tabs
             processed_line = re.sub(r"\s{3,}", "\t", line)
             processed_lines.append(processed_line)
         else:
@@ -75,7 +74,10 @@ def extract_text_from_pdf_without_ocr(pdf_path):
                 if page_text:
                     text += f"--- Page {page_num+1} ---\n{page_text}\n\n"
         
-        return text if len(text.strip()) > 100 else None
+        # If we got meaningful text (more than just a few characters)
+        if len(text.strip()) > 100:
+            return text
+        return None
     except Exception as e:
         logging.error(f"Error extracting text directly from PDF: {e}")
         return None
@@ -85,29 +87,36 @@ def format_purity_value(purity_string):
     if not purity_string:
         return ""
     
-    # If purity is a dictionary
+    # If purity is a dictionary (from complex parsing)
     if isinstance(purity_string, dict):
+        # Prefer base_purity if available
         if 'base_purity' in purity_string:
+            # Remove % and any whitespace, convert to string
             return str(purity_string['base_purity']).replace('%', '').strip()
-        
+        # If no base_purity, try to extract first numeric value
         for value in purity_string.values():
             if isinstance(value, (int, float, str)):
+                # Convert to string, remove %, strip whitespace
                 return str(value).replace('%', '').strip()
-        
+        # Fallback
         return str(purity_string)
     
     # If it's a string
     if isinstance(purity_string, str):
+        # Remove % sign and extra whitespace
         purity_string = purity_string.replace('%', '').strip()
         
+        # Try to extract the first numeric value
         parts = purity_string.split()
         for part in parts:
             try:
+                # Convert to float to ensure it's a number
                 float(part)
                 return part
             except ValueError:
                 continue
     
+    # Fallback - convert to string and strip
     return str(purity_string).replace('%', '').strip()
 
 def parse_coa_data(text):
@@ -119,13 +128,20 @@ def parse_coa_data(text):
     
     # Generic patterns for extraction
     generic_patterns = {
+        # Product identification patterns
         "product_number": r"Product\s+Number:\s*([A-Za-z0-9\-]+)",
         "batch_number": r"Batch\s+Number:\s*([A-Za-z0-9\-]+)",
         "brand": r"Brand:\s*([A-Za-z\s\-]+)",
+        
+        # Chemical identification patterns
         "cas_number": r"CAS\s+Number:\s*([0-9\-]+)",
         "formula": r"Formula:\s*([A-Z0-9]+)",
         "molecular_weight": r"Formula\s+Weight:\s*([\d\.]+)\s*g/mol",
+        
+        # Date patterns
         "quality_release_date": r"Quality\s+Release\s+Date:\s*(\d{1,2}\s+[A-Z]{3}\s+\d{4})",
+        
+        # Purity patterns
         "purity": [
             r"Purity\s*(?:[\d\.]+%?)\s*Guaranteed\s+By\s+Supplier",
             r"Purity\s*:\s*([\d\.]+\s*%)",
@@ -133,24 +149,28 @@ def parse_coa_data(text):
         ]
     }
     
-    # Extract data using patterns
+    # Extract data using generic patterns
     for key, pattern in generic_patterns.items():
+        # Handle purity separately as it might be a list of patterns
         if key == "purity":
             for purity_pattern in pattern:
                 match = re.search(purity_pattern, preprocessed_text, re.IGNORECASE)
                 if match:
+                    # If match has groups, use the first group, otherwise use the whole match
                     data[key] = match.group(1).strip() if match.groups() else match.group(0).strip()
                     break
             continue
         
+        # For other patterns
         match = re.search(pattern, preprocessed_text, re.IGNORECASE)
         if match:
+            # If match has groups, use the first group, otherwise use the whole match
             data[key] = match.group(1).strip() if match.groups() else match.group(0).strip()
     
-    # Document type
+    # Determine document type
     data["document_type"] = "Certificate of Analysis"
     
-    # Product name extraction
+    # Try to extract product name
     product_name_patterns = [
         r"Product\s+Name:\s*([A-Za-z\s\-]+)",
         r"Certificate\s+of\s+Analysis\s+for\s+([A-Za-z\s\-]+)"
@@ -162,11 +182,12 @@ def parse_coa_data(text):
             data["product_name"] = match.group(1).strip()
             break
     
-    # Fallback product name
+    # Fallback product name extraction
     if "product_name" not in data:
+        # Try to use batch number or product number
         data["product_name"] = data.get("batch_number", data.get("product_number", "Unknown Product"))
     
-    # Test results extraction
+    # Extract test results if possible
     test_result_pattern = r"((?:Test|Specification)\s*)(.*?)(Result)"
     test_results = re.findall(test_result_pattern, preprocessed_text, re.DOTALL | re.IGNORECASE)
     
@@ -177,15 +198,20 @@ def parse_coa_data(text):
             test_value = test_result[1].strip()
             test_details[test_name] = test_value
         
+        # If test details found, add to data
         if test_details:
             data["test_results"] = test_details
     
     return data
 
 def refresh_alchemy_token():
-    """Refresh the Alchemy API token"""
+    """
+    Refresh the Alchemy API token using the refresh token.
+    Returns the access token for the specified tenant.
+    """
     global alchemy_token_cache
     
+    # Check if we have a cached token that's still valid (with 5 min buffer)
     current_time = time.time()
     if (alchemy_token_cache["access_token"] and 
         alchemy_token_cache["expires_at"] > current_time + 300):
@@ -218,7 +244,7 @@ def refresh_alchemy_token():
             logging.error(f"Tenant '{ALCHEMY_TENANT_NAME}' not found in refresh response")
             return None
         
-        # Cache the token
+        # Cache the token with expiration time (default to 1 hour if not provided)
         access_token = tenant_token.get("accessToken")
         expires_in = tenant_token.get("expiresIn", 3600)
         
@@ -234,7 +260,6 @@ def refresh_alchemy_token():
         logging.error(f"Error refreshing Alchemy token: {str(e)}")
         return None
 
-# Route for File Extraction
 @app.route('/extract', methods=['POST'])
 def extract():
     # Check if the post request has the file part
@@ -329,7 +354,6 @@ def extract():
     
     return jsonify({"error": "File type not allowed"}), 400
 
-# Route for Sending Data to Alchemy
 @app.route('/send-to-alchemy', methods=['POST'])
 def send_to_alchemy():
     data = request.json
@@ -375,7 +399,9 @@ def send_to_alchemy():
                     },
                     {
                         "identifier": "CasNumber",
-                        "row": 0,
+                        "rows": [
+                            {
+                                "row": 0,
                                 "values": [
                                     {
                                         "value": extracted_data.get('cas_number', ""),
@@ -496,12 +522,10 @@ def send_to_alchemy():
             "message": str(e)
         }), 500
 
-# Main Application Runner
 if __name__ == '__main__':
     # Get port from environment variable or default to 5000
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)# Import Section
-from flask import Flask, request, jsonify, render_template, send_from_directory
+    app.run(host='0.0.0.0', port=port, debug=True)from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
 import pytesseract
 from PIL import Image
@@ -515,13 +539,16 @@ import time
 from pdf2image import convert_from_path
 import PyPDF2
 
-# Logging Configuration
+# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Flask Application Setup
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
-# Configuration Constants
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(app.static_folder, filename)
+
+# Configuration
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -533,32 +560,29 @@ ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.
 ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
 ALCHEMY_TENANT_NAME = os.getenv('ALCHEMY_TENANT_NAME', 'productcaseelnlims4uat')
 
-# Global Token Cache
+# Token cache with expiration
 alchemy_token_cache = {
     "access_token": None,
     "expires_at": 0  # Unix timestamp when the token expires
 }
 
-# Route Handlers
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    return send_from_directory(app.static_folder, filename)
-
-# Utility Functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def preprocess_text_for_tables(text):
     """Preprocess text to better handle table structures"""
+    # Replace multiple spaces with single tabs in table-like areas
     lines = text.split('\n')
     processed_lines = []
     
     for line in lines:
+        # Check if line looks like it could be part of a table (has multiple spaces)
         if re.search(r"\s{3,}", line):
+            # Replace groups of spaces with tabs
             processed_line = re.sub(r"\s{3,}", "\t", line)
             processed_lines.append(processed_line)
         else:
@@ -577,7 +601,10 @@ def extract_text_from_pdf_without_ocr(pdf_path):
                 if page_text:
                     text += f"--- Page {page_num+1} ---\n{page_text}\n\n"
         
-        return text if len(text.strip()) > 100 else None
+        # If we got meaningful text (more than just a few characters)
+        if len(text.strip()) > 100:
+            return text
+        return None
     except Exception as e:
         logging.error(f"Error extracting text directly from PDF: {e}")
         return None
@@ -587,29 +614,36 @@ def format_purity_value(purity_string):
     if not purity_string:
         return ""
     
-    # If purity is a dictionary
+    # If purity is a dictionary (from complex parsing)
     if isinstance(purity_string, dict):
+        # Prefer base_purity if available
         if 'base_purity' in purity_string:
+            # Remove % and any whitespace, convert to string
             return str(purity_string['base_purity']).replace('%', '').strip()
-        
+        # If no base_purity, try to extract first numeric value
         for value in purity_string.values():
             if isinstance(value, (int, float, str)):
+                # Convert to string, remove %, strip whitespace
                 return str(value).replace('%', '').strip()
-        
+        # Fallback
         return str(purity_string)
     
     # If it's a string
     if isinstance(purity_string, str):
+        # Remove % sign and extra whitespace
         purity_string = purity_string.replace('%', '').strip()
         
+        # Try to extract the first numeric value
         parts = purity_string.split()
         for part in parts:
             try:
+                # Convert to float to ensure it's a number
                 float(part)
                 return part
             except ValueError:
                 continue
     
+    # Fallback - convert to string and strip
     return str(purity_string).replace('%', '').strip()
 
 def parse_coa_data(text):
@@ -621,13 +655,20 @@ def parse_coa_data(text):
     
     # Generic patterns for extraction
     generic_patterns = {
+        # Product identification patterns
         "product_number": r"Product\s+Number:\s*([A-Za-z0-9\-]+)",
         "batch_number": r"Batch\s+Number:\s*([A-Za-z0-9\-]+)",
         "brand": r"Brand:\s*([A-Za-z\s\-]+)",
+        
+        # Chemical identification patterns
         "cas_number": r"CAS\s+Number:\s*([0-9\-]+)",
         "formula": r"Formula:\s*([A-Z0-9]+)",
         "molecular_weight": r"Formula\s+Weight:\s*([\d\.]+)\s*g/mol",
+        
+        # Date patterns
         "quality_release_date": r"Quality\s+Release\s+Date:\s*(\d{1,2}\s+[A-Z]{3}\s+\d{4})",
+        
+        # Purity patterns
         "purity": [
             r"Purity\s*(?:[\d\.]+%?)\s*Guaranteed\s+By\s+Supplier",
             r"Purity\s*:\s*([\d\.]+\s*%)",
@@ -635,24 +676,28 @@ def parse_coa_data(text):
         ]
     }
     
-    # Extract data using patterns
+    # Extract data using generic patterns
     for key, pattern in generic_patterns.items():
+        # Handle purity separately as it might be a list of patterns
         if key == "purity":
             for purity_pattern in pattern:
                 match = re.search(purity_pattern, preprocessed_text, re.IGNORECASE)
                 if match:
+                    # If match has groups, use the first group, otherwise use the whole match
                     data[key] = match.group(1).strip() if match.groups() else match.group(0).strip()
                     break
             continue
         
+        # For other patterns
         match = re.search(pattern, preprocessed_text, re.IGNORECASE)
         if match:
+            # If match has groups, use the first group, otherwise use the whole match
             data[key] = match.group(1).strip() if match.groups() else match.group(0).strip()
     
-    # Document type
+    # Determine document type
     data["document_type"] = "Certificate of Analysis"
     
-    # Product name extraction
+    # Try to extract product name
     product_name_patterns = [
         r"Product\s+Name:\s*([A-Za-z\s\-]+)",
         r"Certificate\s+of\s+Analysis\s+for\s+([A-Za-z\s\-]+)"
@@ -664,11 +709,12 @@ def parse_coa_data(text):
             data["product_name"] = match.group(1).strip()
             break
     
-    # Fallback product name
+    # Fallback product name extraction
     if "product_name" not in data:
+        # Try to use batch number or product number
         data["product_name"] = data.get("batch_number", data.get("product_number", "Unknown Product"))
     
-    # Test results extraction
+    # Extract test results if possible
     test_result_pattern = r"((?:Test|Specification)\s*)(.*?)(Result)"
     test_results = re.findall(test_result_pattern, preprocessed_text, re.DOTALL | re.IGNORECASE)
     
@@ -679,15 +725,20 @@ def parse_coa_data(text):
             test_value = test_result[1].strip()
             test_details[test_name] = test_value
         
+        # If test details found, add to data
         if test_details:
             data["test_results"] = test_details
     
     return data
 
 def refresh_alchemy_token():
-    """Refresh the Alchemy API token"""
+    """
+    Refresh the Alchemy API token using the refresh token.
+    Returns the access token for the specified tenant.
+    """
     global alchemy_token_cache
     
+    # Check if we have a cached token that's still valid (with 5 min buffer)
     current_time = time.time()
     if (alchemy_token_cache["access_token"] and 
         alchemy_token_cache["expires_at"] > current_time + 300):
@@ -720,7 +771,7 @@ def refresh_alchemy_token():
             logging.error(f"Tenant '{ALCHEMY_TENANT_NAME}' not found in refresh response")
             return None
         
-        # Cache the token
+        # Cache the token with expiration time (default to 1 hour if not provided)
         access_token = tenant_token.get("accessToken")
         expires_in = tenant_token.get("expiresIn", 3600)
         
@@ -736,7 +787,6 @@ def refresh_alchemy_token():
         logging.error(f"Error refreshing Alchemy token: {str(e)}")
         return None
 
-# Route for File Extraction
 @app.route('/extract', methods=['POST'])
 def extract():
     # Check if the post request has the file part
@@ -831,7 +881,6 @@ def extract():
     
     return jsonify({"error": "File type not allowed"}), 400
 
-# Route for Sending Data to Alchemy
 @app.route('/send-to-alchemy', methods=['POST'])
 def send_to_alchemy():
     data = request.json
@@ -841,16 +890,4 @@ def send_to_alchemy():
     
     try:
         # Extract the data received from the client
-        extracted_data = data.get('data', {})
-        
-        # Format purity value - extract just the numeric part
-        purity_value = format_purity_value(extracted_data.get('purity', ""))
-        
-        # Get a fresh access token from Alchemy
-        access_token = refresh_alchemy_token()
-        
-        if not access_token:
-            return jsonify({
-                "status": "error", 
-                "message": "Failed to authenticate with Alchemy API"
-            }), 500                        
+        extracted_data

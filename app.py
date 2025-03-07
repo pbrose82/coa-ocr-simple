@@ -432,9 +432,31 @@ def extract():
             record_id = "51409"
             record_url = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/{record_id}"
             
-            # Store these for internal use without displaying them
-            data["_record_id"] = record_id
-            data["_record_url"] = record_url
+            # Store these for internal use in a separate object that won't be sent to frontend
+            internal_data = {
+                "record_id": record_id,
+                "record_url": record_url
+            }
+            
+            # Save this internally for Alchemy API calls
+            app.config['LAST_EXTRACTED_DATA'] = {
+                "data": data,
+                "internal": internal_data
+            }
+            
+            # Remove any record fields from the data to ensure they don't display
+            if 'record_id' in data:
+                del data['record_id']
+            if 'record_url' in data:
+                del data['record_url']
+            if '_record_id' in data:
+                del data['_record_id']
+            if '_record_url' in data:
+                del data['_record_url']
+            if 'Record Id' in data:
+                del data['Record Id']
+            if 'Record Url' in data:
+                del data['Record Url']
             
             total_time = time.time() - start_time
             logging.info(f"Total processing time: {total_time:.2f} seconds")
@@ -462,8 +484,20 @@ def send_to_alchemy():
         return jsonify({"status": "error", "message": "No data provided"}), 400
     
     try:
-        # Extract the data received from the client
-        extracted_data = data.get('data', {})
+        # Get the saved data from app config
+        try:
+            saved_data = app.config.get('LAST_EXTRACTED_DATA', {})
+            extracted_data = saved_data.get('data', {})
+            internal_data = saved_data.get('internal', {})
+            
+            # Get record ID and URL from internal data
+            record_id = internal_data.get('record_id', "51409")
+            record_url = internal_data.get('record_url', f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409")
+        except:
+            # Fallback if something went wrong
+            extracted_data = data.get('data', {})
+            record_id = "51409"
+            record_url = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409"
         
         # Format purity value - extract just the numeric part
         purity_value = format_purity_value(extracted_data.get('purity', ""))

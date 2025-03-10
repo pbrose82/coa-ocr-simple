@@ -680,3 +680,183 @@ def send_to_alchemy():
     data = request.json
     
     if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+    
+    try:
+        # Get the saved data from app config
+        try:
+            saved_data = app.config.get('LAST_EXTRACTED_DATA', {})
+            extracted_data = saved_data.get('data', {})
+            internal_data = saved_data.get('internal', {})
+            
+            # Get record ID and URL from internal data
+            record_id = internal_data.get('record_id', "51409")
+            record_url = internal_data.get('record_url', f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409")
+        except:
+            # Fallback if something went wrong
+            extracted_data = data.get('data', {})
+            record_id = "51409"
+            record_url = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409"
+        
+        # Format purity value - extract just the numeric part
+        purity_value = format_purity_value(extracted_data.get('purity', ""))
+        
+        # Get a fresh access token from Alchemy
+        access_token = refresh_alchemy_token()
+        
+        if not access_token:
+            return jsonify({
+                "status": "error", 
+                "message": "Failed to authenticate with Alchemy API"
+            }), 500
+        
+        # Format data for Alchemy API - exactly matching the Postman structure
+        alchemy_payload = [
+            {
+                "processId": None,
+                "recordTemplate": "exampleParsing",
+                "properties": [
+                    {
+                        "identifier": "RecordName",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "CasNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('cas_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "Purity",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": purity_value,
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "identifier": "LotNumber",
+                        "rows": [
+                            {
+                                "row": 0,
+                                "values": [
+                                    {
+                                        "value": extracted_data.get('lot_number', ""),
+                                        "valuePreview": ""
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+        
+        # Send to Alchemy API
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
+        response = requests.post(ALCHEMY_API_URL, headers=headers, json=alchemy_payload)
+        
+        # Log response for debugging
+        logging.info(f"Alchemy API response status code: {response.status_code}")
+        logging.info(f"Alchemy API response: {response.text}")
+        
+        # Check if the request was successful
+        response.raise_for_status()
+        
+        # Try to extract the record ID from the response
+        record_id = None
+        record_url = None
+        try:
+            response_data = response.json()
+            # Extract record ID from response - adjust this based on actual response structure
+            if isinstance(response_data, list) and len(response_data) > 0:
+                if 'id' in response_data[0]:
+                    record_id = response_data[0]['id']
+                elif 'recordId' in response_data[0]:
+                    record_id = response_data[0]['recordId']
+            elif isinstance(response_data, dict):
+                if 'id' in response_data:
+                    record_id = response_data['id']
+                elif 'recordId' in response_data:
+                    record_id = response_data['recordId']
+                elif 'data' in response_data and isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                    if 'id' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['id']
+                    elif 'recordId' in response_data['data'][0]:
+                        record_id = response_data['data'][0]['recordId']
+            
+            # If record ID was found, construct the URL
+            if record_id:
+                record_url = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/{record_id}"
+                logging.info(f"Created record URL: {record_url}")
+            
+        except Exception as e:
+            logging.warning(f"Could not extract record ID from response: {e}")
+        
+        # Return success response with record URL if available
+        return jsonify({
+            "status": "success", 
+            "message": "Data successfully sent to Alchemy",
+            "response": response.json() if response.text else {"message": "No content in response"},
+            "record_id": record_id,
+            "record_url": record_url
+        })
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error sending to Alchemy: {e}")
+        
+        # Try to capture response content if available
+        error_response = None
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_response = e.response.json()
+            except:
+                error_response = {"text": e.response.text}
+        
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "details": error_response
+        }), 500
+        
+    except Exception as e:
+        logging.error(f"Error sending to Alchemy: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500
+
+# Main Application Runner
+if __name__ == '__main__':
+    # Get port from environment variable or default to 5000
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

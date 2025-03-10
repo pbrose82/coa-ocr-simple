@@ -18,11 +18,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Reset button - refresh the entire page
     resetButton.addEventListener('click', function() {
-        // Update button state to INITIAL before reloading
-        if (typeof ButtonManager !== 'undefined') {
-            ButtonManager.updateState(ButtonManager.AppState.INITIAL);
-        }
-        
         // This will reload the entire page
         window.location.reload();
     });

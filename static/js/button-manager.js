@@ -127,8 +127,26 @@ const ButtonManager = (function() {
     function setButtonState(button, enabled, type, visible) {
         if (!button) return;
         
-        // Set visibility
-        button.style.display = visible ? 'block' : 'none';
+        // For the file input label, don't change the display style
+        if (button === chooseFileBtn) {
+            // Only update enabled state for the choose file button
+            if (enabled) {
+                button.classList.remove('disabled');
+            } else {
+                button.classList.add('disabled');
+            }
+            return;
+        }
+        
+        // For other buttons, set visibility
+        if (visible) {
+            // Don't change display style if already visible
+            if (button.style.display === 'none') {
+                button.style.display = '';
+            }
+        } else {
+            button.style.display = 'none';
+        }
         
         // Set enabled/disabled state
         if (enabled) {

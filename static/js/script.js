@@ -306,7 +306,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // UPDATED: Display results function to properly format test results
+    // UPDATED: Display results function to fix product name issue and simplify test results
     function displayResults(data) {
         // Clear previous results
         dataTable.innerHTML = '';
@@ -316,9 +316,16 @@ document.addEventListener('DOMContentLoaded', function() {
             // Skip the test_results and full_text fields - we'll handle them separately
             if (key !== 'test_results' && key !== 'full_text') {
                 const row = document.createElement('tr');
+                
+                // Format the key name for display
+                const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                
+                // Format the value - special handling for product_name
+                let displayValue = value;
+                
                 row.innerHTML = `
-                    <td><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
-                    <td>${value}</td>
+                    <td><strong>${displayKey}</strong></td>
+                    <td>${displayValue}</td>
                 `;
                 dataTable.appendChild(row);
             }
@@ -338,7 +345,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 <thead>
                     <tr>
                         <th>Test</th>
-                        <th>Specification</th>
                         <th>Result</th>
                     </tr>
                 </thead>
@@ -351,18 +357,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Check if testData is an object with specification and result
                 if (typeof testData === 'object' && testData !== null) {
-                    const spec = testData.specification || '';
-                    const result = testData.result || '';
+                    // Use result if available, otherwise just show the specification
+                    const result = testData.result || testData.specification || '';
                     testDataRow.innerHTML = `
                         <td>${testName}</td>
-                        <td>${spec}</td>
                         <td>${result}</td>
                     `;
                 } else {
                     // Simple value format
                     testDataRow.innerHTML = `
                         <td>${testName}</td>
-                        <td></td>
                         <td>${testData}</td>
                     `;
                 }

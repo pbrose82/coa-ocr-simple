@@ -18,6 +18,11 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Reset button - refresh the entire page
     resetButton.addEventListener('click', function() {
+        // Update button state to INITIAL before reloading
+        if (typeof ButtonManager !== 'undefined') {
+            ButtonManager.updateState(ButtonManager.AppState.INITIAL);
+        }
+        
         // This will reload the entire page
         window.location.reload();
     });
@@ -48,10 +53,20 @@ document.addEventListener('DOMContentLoaded', function() {
             fileName.textContent = fileInput.files[0].name;
             extractButton.classList.add('active');
             uploadArea.classList.add('file-selected');
+            
+            // Update button state using ButtonManager
+            if (typeof ButtonManager !== 'undefined') {
+                ButtonManager.updateState(ButtonManager.AppState.FILE_UPLOADED);
+            }
         } else {
             fileName.textContent = '';
             extractButton.classList.remove('active');
             uploadArea.classList.remove('file-selected');
+            
+            // Update button state using ButtonManager
+            if (typeof ButtonManager !== 'undefined') {
+                ButtonManager.updateState(ButtonManager.AppState.INITIAL);
+            }
         }
     });
     
@@ -94,6 +109,11 @@ document.addEventListener('DOMContentLoaded', function() {
         sendToAlchemy.disabled = true;
         sendToAlchemy.classList.remove('active');
         extractedData = null;
+        
+        // Update button state to EXTRACTING using ButtonManager
+        if (typeof ButtonManager !== 'undefined') {
+            ButtonManager.updateState(ButtonManager.AppState.EXTRACTING);
+        }
         
         // Show processing status
         processingStatus.style.display = 'block';
@@ -155,6 +175,10 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (data.error) {
                 alert('Error: ' + data.error);
+                // Update button state back to FILE_UPLOADED
+                if (typeof ButtonManager !== 'undefined') {
+                    ButtonManager.updateState(ButtonManager.AppState.FILE_UPLOADED);
+                }
                 return;
             }
             
@@ -189,6 +213,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 sendToAlchemy.disabled = false;
                 sendToAlchemy.classList.add('active');
             }
+            
+            // Update button state to EXTRACTED using ButtonManager
+            if (typeof ButtonManager !== 'undefined') {
+                ButtonManager.updateState(ButtonManager.AppState.EXTRACTED);
+            }
         })
         .catch(error => {
             // Clear intervals and timeouts
@@ -200,6 +229,11 @@ document.addEventListener('DOMContentLoaded', function() {
             
             console.error('Error:', error);
             alert('Error processing file. The server might have timed out. For PDFs, try using a smaller file or converting it to an image first.');
+            
+            // Update button state back to FILE_UPLOADED
+            if (typeof ButtonManager !== 'undefined') {
+                ButtonManager.updateState(ButtonManager.AppState.FILE_UPLOADED);
+            }
         });
     });
     
@@ -208,6 +242,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!extractedData) {
             alert('No data to send to Alchemy');
             return;
+        }
+        
+        // Update button state to SUBMITTING using ButtonManager
+        if (typeof ButtonManager !== 'undefined') {
+            ButtonManager.updateState(ButtonManager.AppState.SUBMITTING);
         }
         
         // Show processing status
@@ -233,6 +272,11 @@ document.addEventListener('DOMContentLoaded', function() {
             processingStatus.style.display = 'none';
             
             if (data.status === 'success') {
+                // Update button state to SUBMITTED using ButtonManager
+                if (typeof ButtonManager !== 'undefined') {
+                    ButtonManager.updateState(ButtonManager.AppState.SUBMITTED);
+                }
+                
                 // Display success message and record link
                 if (data.record_url && data.record_id) {
                     recordLink.href = data.record_url;
@@ -243,6 +287,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 alert('Error: ' + (data.message || 'Failed to send data to Alchemy'));
+                
+                // Update button state back to EXTRACTED
+                if (typeof ButtonManager !== 'undefined') {
+                    ButtonManager.updateState(ButtonManager.AppState.EXTRACTED);
+                }
             }
         })
         .catch(error => {
@@ -250,6 +299,11 @@ document.addEventListener('DOMContentLoaded', function() {
             processingStatus.style.display = 'none';
             console.error('Error:', error);
             alert('Error: ' + (error.message || 'Failed to send data to Alchemy'));
+            
+            // Update button state back to EXTRACTED
+            if (typeof ButtonManager !== 'undefined') {
+                ButtonManager.updateState(ButtonManager.AppState.EXTRACTED);
+            }
         });
     });
     
@@ -294,6 +348,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const files = dt.files;
         
         if (files.length > 0) {
+            // Update button state to UPLOADING using ButtonManager
+            if (typeof ButtonManager !== 'undefined') {
+                ButtonManager.updateState(ButtonManager.AppState.UPLOADING);
+            }
+            
             fileInput.files = files;
             
             // Update the file name display

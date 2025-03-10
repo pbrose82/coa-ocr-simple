@@ -38,9 +38,14 @@
             cursor: not-allowed;
             pointer-events: none;
         }
+        
+        /* Style for disabled label */
+        label.disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
     </style>
-    <!-- Load button-manager.js before script.js -->
-    <script src="{{ url_for('static', filename='js/button-manager.js') }}"></script>
 </head>
 <body>
     <div class="header">
@@ -73,7 +78,6 @@
             
             <div class="form-group">
                 <label class="form-label">Select COA File</label>
-                <!-- Added id="dropZone" to ensure the element is easily identifiable in JS -->
                 <div class="file-upload" id="dropZone">
                     <div class="file-upload-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-cloud-arrow-up" viewBox="0 0 16 16">
@@ -122,4 +126,26 @@
         <div id="results" style="display: none;" class="result-box">
             <h5>Extracted Data:</h5>
             <table class="table table-bordered">
-                <tbody
+                <tbody id="dataTable">
+                    <!-- Data will be inserted here -->
+                </tbody>
+            </table>
+            
+            <div class="mt-4">
+                <h5>Raw Text:</h5>
+                <pre id="rawText" style="max-height: 200px; overflow-y: auto;"></pre>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <img src="{{ url_for('static', filename='Alchemy-logo.svg') }}" alt="Alchemy Cloud Logo" class="footer-logo">
+        <div class="copyright">© ALCHEMY CLOUD, INC. ALL RIGHTS RESERVED.</div>
+    </div>
+    
+    <!-- Load button-manager.js before script.js -->
+    <script src="{{ url_for('static', filename='js/button-manager.js') }}"></script>
+    <!-- Your main script file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

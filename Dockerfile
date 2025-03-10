@@ -1,27 +1,29 @@
 FROM python:3.9-slim
 
-# Install Tesseract OCR and Poppler utils for PDF processing
+# Install Tesseract OCR and Poppler (needed for PDF processing)
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
+    libtesseract-dev \
     poppler-utils \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy application files
-COPY app.py requirements.txt ./
-COPY static/ ./static/
-
-# Create uploads directory
-RUN mkdir -p uploads
-
-# Install dependencies
+# Copy requirements and install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose port
+# Copy application files
+COPY app.py .
+COPY static/ static/
+COPY templates/ templates/
+
+# Expose port - environment variable will override this
 EXPOSE 5000
+
+# Run the application with the correct port
+CMD gunicorn --bind 0.0.0.0:$PORT app:app
 
 # Run the application
 CMD ["python", "app.py"]

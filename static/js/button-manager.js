@@ -27,19 +27,19 @@ const ButtonManager = (function() {
     let submitToAlchemyBtn;
     let resetBtn;
     let fileInput;
-    let statusMessage;
+    let uploadArea;
 
     /**
      * Initialize the button manager
      */
     function init() {
-        // Get button elements
-        chooseFileBtn = document.getElementById('choose-file-btn');
-        extractDataBtn = document.getElementById('extract-button');
-        submitToAlchemyBtn = document.getElementById('submit-button');
-        resetBtn = document.getElementById('reset-button');
-        fileInput = document.getElementById('file-input');
-        statusMessage = document.getElementById('upload-message');
+        // Get button elements - using your existing IDs
+        chooseFileBtn = document.querySelector('.custom-file-upload'); // This is your file select label
+        extractDataBtn = document.getElementById('extractButton');
+        submitToAlchemyBtn = document.getElementById('sendToAlchemy');
+        resetBtn = document.getElementById('resetButton');
+        fileInput = document.getElementById('fileInput');
+        uploadArea = document.getElementById('dropZone');
 
         // Set initial button states
         updateState(AppState.INITIAL);
@@ -50,16 +50,9 @@ const ButtonManager = (function() {
     /**
      * Update button states based on application state
      * @param {string} state - The new application state
-     * @param {string} message - Optional status message to display
      */
-    function updateState(state, message = '') {
+    function updateState(state) {
         currentState = state;
-        
-        // Update status message if provided and element exists
-        if (message && statusMessage) {
-            statusMessage.textContent = message;
-            statusMessage.style.display = 'block';
-        }
         
         // Update button states based on current application state
         switch(state) {
@@ -69,6 +62,9 @@ const ButtonManager = (function() {
                 setButtonState(extractDataBtn, false, 'primary', true);
                 setButtonState(submitToAlchemyBtn, false, 'primary', false);
                 setButtonState(resetBtn, false, 'secondary', true);
+                
+                // Additional UI state changes
+                if (uploadArea) uploadArea.classList.remove('file-selected');
                 break;
                 
             case AppState.UPLOADING:
@@ -132,25 +128,21 @@ const ButtonManager = (function() {
         if (!button) return;
         
         // Set visibility
-        button.style.display = visible ? 'inline-block' : 'none';
+        button.style.display = visible ? 'block' : 'none';
         
         // Set enabled/disabled state
         if (enabled) {
             button.removeAttribute('disabled');
             button.classList.remove('disabled');
+            
+            // For extract and submit buttons, add active class to make them blue
+            if ((button === extractDataBtn || button === submitToAlchemyBtn) && type === 'primary') {
+                button.classList.add('active');
+            }
         } else {
             button.setAttribute('disabled', 'disabled');
             button.classList.add('disabled');
-        }
-        
-        // Set button type if needed
-        // Note: Only modify classes if your buttons use these classes
-        if (type === 'primary' && !button.classList.contains('btn-primary')) {
-            button.classList.remove('btn-secondary');
-            button.classList.add('btn-primary');
-        } else if (type === 'secondary' && !button.classList.contains('btn-secondary')) {
-            button.classList.remove('btn-primary');
-            button.classList.add('btn-secondary');
+            button.classList.remove('active');
         }
     }
 
@@ -173,5 +165,8 @@ const ButtonManager = (function() {
 
 // Initialize when the DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    ButtonManager.init();
+    // Initialize button manager after a short delay to ensure all elements are loaded
+    setTimeout(function() {
+        ButtonManager.init();
+    }, 100);
 });

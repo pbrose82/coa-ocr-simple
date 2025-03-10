@@ -196,6 +196,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
+            // Ensure product name is set for Hydrochloric acid COAs
+            if (data.full_text && data.full_text.includes("Hydrochloric acid") && (!data.product_name || data.product_name === "")) {
+                const productMatch = data.full_text.match(/Hydrochloric acid[^:\n]*/);
+                if (productMatch) {
+                    data.product_name = productMatch[0].trim();
+                }
+            }
+            
             // Save extracted data
             extractedData = data;
             
@@ -306,10 +314,25 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // UPDATED: Display results function to fix product name issue and simplify test results
+    // IMPROVED: Display results function to properly handle product name and test results
     function displayResults(data) {
         // Clear previous results
         dataTable.innerHTML = '';
+        
+        // Fix for missing product name - specially for Hydrochloric acid
+        if ((!data.product_name || data.product_name === "") && data.full_text) {
+            // Try to find Hydrochloric acid in the text
+            const acidMatch = data.full_text.match(/Hydrochloric acid\s*-\s*ACS reagent,\s*37%/i);
+            if (acidMatch) {
+                data.product_name = acidMatch[0].trim();
+            } else if (data.full_text.includes("Hydrochloric acid")) {
+                // Simpler match if the specific format isn't found
+                const simpleMatch = data.full_text.match(/Hydrochloric acid[^:\n]*/);
+                if (simpleMatch) {
+                    data.product_name = simpleMatch[0].trim();
+                }
+            }
+        }
         
         // Display metadata fields
         for (const [key, value] of Object.entries(data)) {
@@ -320,64 +343,75 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Format the key name for display
                 const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                 
-                // Format the value - special handling for product_name
-                let displayValue = value;
-                
                 row.innerHTML = `
                     <td><strong>${displayKey}</strong></td>
-                    <td>${displayValue}</td>
+                    <td>${value}</td>
                 `;
                 dataTable.appendChild(row);
             }
         }
         
-        // Handle test_results specially - add a row for test results
-        if (data.test_results && typeof data.test_results === 'object') {
-            // Create a row for test results
-            const testRow = document.createElement('tr');
-            const testCell = document.createElement('td');
-            testCell.innerHTML = `<strong>Test Results</strong>`;
-            
-            const resultsCell = document.createElement('td');
-            const testTable = document.createElement('table');
-            testTable.className = 'table table-bordered table-sm';
-            testTable.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>Test</th>
-                        <th>Result</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
+        // Parse and display test results
+        const testRow = document.createElement('tr');
+        const testCell = document.createElement('td');
+        testCell.innerHTML = `<strong>Test Results</strong>`;
+        
+        const resultsCell = document.createElement('td');
+        const testTable = document.createElement('table');
+        testTable.className = 'table table-bordered table-sm';
+        testTable.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Test</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        `;
+        
+        const testBody = testTable.querySelector('tbody');
+        
+        // Extract test results directly from the raw text
+        const extractedTests = extractTestsFromRawText(data.full_text);
+        
+        // Add each test to the table
+        for (const test of extractedTests) {
+            const testDataRow = document.createElement('tr');
+            testDataRow.innerHTML = `
+                <td>${test.name}</td>
+                <td>${test.result}</td>
             `;
+            testBody.appendChild(testDataRow);
+        }
+        
+        // If we have structured test results, add any that might not have been parsed from raw text
+        if (data.test_results && typeof data.test_results === 'object') {
+            const existingTestNames = extractedTests.map(t => t.name);
             
-            const testBody = testTable.querySelector('tbody');
             for (const [testName, testData] of Object.entries(data.test_results)) {
-                const testDataRow = document.createElement('tr');
+                // Skip if this test is already in our list
+                if (existingTestNames.includes(testName)) continue;
                 
-                // Check if testData is an object with specification and result
+                let result = "";
                 if (typeof testData === 'object' && testData !== null) {
-                    // Use result if available, otherwise just show the specification
-                    const result = testData.result || testData.specification || '';
-                    testDataRow.innerHTML = `
-                        <td>${testName}</td>
-                        <td>${result}</td>
-                    `;
+                    result = testData.result || testData.specification || '';
                 } else {
-                    // Simple value format
-                    testDataRow.innerHTML = `
-                        <td>${testName}</td>
-                        <td>${testData}</td>
-                    `;
+                    result = testData;
                 }
+                
+                const testDataRow = document.createElement('tr');
+                testDataRow.innerHTML = `
+                    <td>${testName}</td>
+                    <td>${result}</td>
+                `;
                 testBody.appendChild(testDataRow);
             }
-            
-            resultsCell.appendChild(testTable);
-            testRow.appendChild(testCell);
-            testRow.appendChild(resultsCell);
-            dataTable.appendChild(testRow);
         }
+        
+        resultsCell.appendChild(testTable);
+        testRow.appendChild(testCell);
+        testRow.appendChild(resultsCell);
+        dataTable.appendChild(testRow);
         
         // Display raw text
         if (data.full_text) {
@@ -386,6 +420,143 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Show results container
         results.style.display = 'block';
+    }
+    
+    // Function to extract test results directly from raw text
+    function extractTestsFromRawText(text) {
+        if (!text) return [];
+        
+        const tests = [];
+        const testSectionRegex = /Test\s+Specification\s+Result\s*\n(.*?)(?:_{10,}|Larry Coers|Quality Control|Certificate of Analysis|Version Number)/s;
+        const testSectionMatch = text.match(testSectionRegex);
+        
+        if (testSectionMatch && testSectionMatch[1]) {
+            const testSection = testSectionMatch[1];
+            const lines = testSection.split('\n').filter(line => line.trim() !== '');
+            
+            let currentTest = null;
+            let currentSpec = null;
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Skip empty lines or divider lines
+                if (!line || line.match(/^[-_=]{3,}$/)) continue;
+                
+                // Pattern 1: Full line with test, spec, and result (most common case)
+                // Example: "Appearance (Color) Colorless Colorless"
+                const fullLineMatch = line.match(/^([^<0-9]+?)(?:\s{2,}|\t)([^_]+?)(?:\s{2,}|\t|_)([^_]*)$/);
+                if (fullLineMatch) {
+                    const testName = fullLineMatch[1].trim();
+                    const result = fullLineMatch[3].trim() || fullLineMatch[2].trim();
+                    tests.push({ name: testName, result: result });
+                    continue;
+                }
+                
+                // Pattern 2: Line with just test name and specification
+                // Examples: "Color Test < 10 APHA"
+                const specLineMatch = line.match(/^([^<0-9]+?)(?:\s{2,}|\t)([<>][^_]+|[\d\.]+\s*-\s*[\d\.]+\s*[%\w]*)$/);
+                if (specLineMatch) {
+                    currentTest = specLineMatch[1].trim();
+                    currentSpec = specLineMatch[2].trim();
+                    
+                    // Check next line for result
+                    if (i < lines.length - 1 && !lines[i+1].match(/^[A-Za-z]/)) {
+                        const resultLine = lines[i+1].trim();
+                        tests.push({ name: currentTest, result: resultLine });
+                        currentTest = null;
+                        currentSpec = null;
+                        i++; // Skip the next line since we've already processed it
+                    } else {
+                        // If no separate result line, use spec as result
+                        tests.push({ name: currentTest, result: currentSpec });
+                        currentTest = null;
+                        currentSpec = null;
+                    }
+                    continue;
+                }
+                
+                // Pattern 3: Special case for test lines that have continuation lines
+                if (line === "Free from Suspended Matter or Sediment" && tests.length > 0) {
+                    // This is a continuation of the previous test (Appearance (Clarity))
+                    const lastTest = tests[tests.length - 1];
+                    lastTest.name += " " + line;
+                    continue;
+                }
+                
+                // Pattern 4: Special case for "(by ICP)" line
+                if (line === "(by ICP)" && tests.length > 0) {
+                    // This is a continuation of the previous test (Heavy Metals)
+                    const lastTest = tests[tests.length - 1];
+                    lastTest.name += " " + line;
+                    continue;
+                }
+                
+                // Pattern 5: Separate test, specification and result on different lines
+                if (line.match(/^[A-Za-z]/) && !line.includes("<") && !line.includes("-")) {
+                    if (i < lines.length - 1) {
+                        const nextLine = lines[i+1].trim();
+                        if (nextLine.match(/^[<>0-9]/) || nextLine.includes("-")) {
+                            // This is likely a test name followed by spec on next line
+                            currentTest = line;
+                            
+                            // Skip to spec line
+                            i++;
+                            currentSpec = nextLine;
+                            
+                            // Check if there's a result line after
+                            if (i < lines.length - 1 && !lines[i+1].match(/^[A-Za-z]/)) {
+                                const resultLine = lines[i+1].trim();
+                                tests.push({ name: currentTest, result: resultLine });
+                                i++; // Skip the result line
+                            } else {
+                                // Use spec as result if no separate result line
+                                tests.push({ name: currentTest, result: currentSpec });
+                            }
+                            
+                            currentTest = null;
+                            currentSpec = null;
+                            continue;
+                        }
+                    }
+                    
+                    // If we get here, it's likely just a test name without clear spec/result
+                    tests.push({ name: line, result: "" });
+                }
+            }
+        }
+        
+        // Look for more common test patterns in the text
+        const commonTests = [
+            { name: "Appearance (Clarity)", regex: /Appearance\s*\(Clarity\).*?(Clear)/ },
+            { name: "Appearance (Color)", regex: /Appearance\s*\(Color\).*?(Colorless)/ },
+            { name: "Appearance (Form)", regex: /Appearance\s*\(Form\).*?(Liquid)/ },
+            { name: "Color Test", regex: /Color\s*Test.*?([0-9]+\s*APHA)/ },
+            { name: "Titration with NaOH", regex: /Titration.*?NaOH.*?([\d\.]+\s*%)/ },
+            { name: "Residue on Ignition", regex: /Residue\s*on\s*Ignition.*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Arsenic (As)", regex: /Arsenic.*?\(As\).*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Bromide", regex: /Bromide.*?(<\s*[\d\.]+\s*%)/ },
+            { name: "Iron (Fe)", regex: /Iron.*?\(Fe\).*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Free Chlorine", regex: /Free\s*Chlorine.*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Heavy Metals", regex: /Heavy\s*Metals.*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Ammonium", regex: /Ammonium.*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Sulfite", regex: /Sulfite.*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Sulfate", regex: /Sulfate.*?(<\s*[\d\.]+\s*ppm)/ },
+            { name: "Meets ACS Requirements", regex: /Meets\s*ACS\s*Requirements.*?(Conforms)/ }
+        ];
+        
+        // Add any common tests that weren't found
+        for (const commonTest of commonTests) {
+            // Skip if we already have this test
+            if (tests.some(t => t.name.includes(commonTest.name))) continue;
+            
+            const match = text.match(commonTest.regex);
+            if (match) {
+                tests.push({ name: commonTest.name, result: match[1] });
+            }
+        }
+        
+        return tests;
     }
     
     // ===== DRAG AND DROP FUNCTIONALITY =====

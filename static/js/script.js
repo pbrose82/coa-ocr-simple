@@ -1,5 +1,11 @@
+/**
+ * Main script for COA Intelligence application
+ * This script handles file uploads, OCR processing, and form submissions
+ */
+
+// Wait for the DOM to be fully loaded before executing
 document.addEventListener('DOMContentLoaded', function() {
-    // DOM elements
+    // Define variables for various HTML elements
     const fileInput = document.getElementById('fileInput');
     const fileName = document.getElementById('fileName');
     const fileFormat = document.getElementById('fileFormat');
@@ -15,12 +21,25 @@ document.addEventListener('DOMContentLoaded', function() {
     const recordLink = document.getElementById('recordLink');
     const resetButton = document.getElementById('resetButton');
     const uploadArea = document.querySelector('.upload-area') || document.getElementById('dropZone');
+    const chooseFileBtn = document.querySelector('.custom-file-upload');
     
     // Reset button - refresh the entire page
     resetButton.addEventListener('click', function() {
+        // Update button state to INITIAL before reloading if ButtonManager is available
+        if (typeof ButtonManager !== 'undefined') {
+            ButtonManager.updateState(ButtonManager.AppState.INITIAL);
+        }
+        
         // This will reload the entire page
         window.location.reload();
     });
+    
+    // If chooseFileBtn exists, make it trigger file input
+    if (chooseFileBtn) {
+        chooseFileBtn.addEventListener('click', function() {
+            fileInput.click();
+        });
+    }
     
     // File input change handler
     fileInput.addEventListener('change', function() {
@@ -181,22 +200,7 @@ document.addEventListener('DOMContentLoaded', function() {
             extractedData = data;
             
             // Display results
-            results.style.display = 'block';
-            
-            // Display extracted data in table
-            for (const [key, value] of Object.entries(data)) {
-                if (key !== 'full_text') {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
-                        <td>${value}</td>
-                    `;
-                    dataTable.appendChild(row);
-                }
-            }
-            
-            // Display raw text
-            rawText.textContent = data.full_text;
+            displayResults(data);
             
             // Update button states
             extractButton.classList.add('disabled');
@@ -249,7 +253,7 @@ document.addEventListener('DOMContentLoaded', function() {
         statusText.textContent = 'Sending data to Alchemy...';
         progressBar.style.width = '50%';
         
-        // Format data for Alchemy's expected structure
+        // Format data for Alchemy API
         const payload = {
             data: extractedData
         };
@@ -301,6 +305,84 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+    
+    // UPDATED: Display results function to properly format test results
+    function displayResults(data) {
+        // Clear previous results
+        dataTable.innerHTML = '';
+        
+        // Display metadata fields
+        for (const [key, value] of Object.entries(data)) {
+            // Skip the test_results and full_text fields - we'll handle them separately
+            if (key !== 'test_results' && key !== 'full_text') {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</strong></td>
+                    <td>${value}</td>
+                `;
+                dataTable.appendChild(row);
+            }
+        }
+        
+        // Handle test_results specially - add a row for test results
+        if (data.test_results && typeof data.test_results === 'object') {
+            // Create a row for test results
+            const testRow = document.createElement('tr');
+            const testCell = document.createElement('td');
+            testCell.innerHTML = `<strong>Test Results</strong>`;
+            
+            const resultsCell = document.createElement('td');
+            const testTable = document.createElement('table');
+            testTable.className = 'table table-bordered table-sm';
+            testTable.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th>Specification</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            
+            const testBody = testTable.querySelector('tbody');
+            for (const [testName, testData] of Object.entries(data.test_results)) {
+                const testDataRow = document.createElement('tr');
+                
+                // Check if testData is an object with specification and result
+                if (typeof testData === 'object' && testData !== null) {
+                    const spec = testData.specification || '';
+                    const result = testData.result || '';
+                    testDataRow.innerHTML = `
+                        <td>${testName}</td>
+                        <td>${spec}</td>
+                        <td>${result}</td>
+                    `;
+                } else {
+                    // Simple value format
+                    testDataRow.innerHTML = `
+                        <td>${testName}</td>
+                        <td></td>
+                        <td>${testData}</td>
+                    `;
+                }
+                testBody.appendChild(testDataRow);
+            }
+            
+            resultsCell.appendChild(testTable);
+            testRow.appendChild(testCell);
+            testRow.appendChild(resultsCell);
+            dataTable.appendChild(testRow);
+        }
+        
+        // Display raw text
+        if (data.full_text) {
+            rawText.textContent = data.full_text;
+        }
+        
+        // Show results container
+        results.style.display = 'block';
+    }
     
     // ===== DRAG AND DROP FUNCTIONALITY =====
     

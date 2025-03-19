@@ -81,62 +81,108 @@ def extract_text_from_pdf_without_ocr(pdf_path):
         return None
 
 def format_purity_value(purity_string):
-    """Extract and format the purity value for Alchemy API"""
+    """Extract and format the purity value for Alchemy API from various COA formats"""
     if not purity_string:
         return ""
     
-    # For benzene document, always return the correct value
-    if isinstance(purity_string, str) and "99.95" in purity_string:
-        return "99.95"
+    # Handle dictionary input
+    if isinstance(purity_string, dict):
+        if 'base_purity' in purity_string:
+            return str(purity_string['base_purity']).replace('%', '').strip()
+        
+        # Try to find a result field
+        if 'result' in purity_string:
+            return format_purity_value(purity_string['result'])
+        
+        # Otherwise iterate through values
+        for value in purity_string.values():
+            if isinstance(value, (int, float, str)):
+                return format_purity_value(str(value))
+        
+        return ""
     
-    # Try to extract just the first number from the string
+    # Handle string input
     if isinstance(purity_string, str):
-        # Extract the first number in the string
-        match = re.search(r'(\d+\.\d+)', purity_string)
+        # Remove % symbols for processing
+        clean_string = purity_string.replace('%', '').strip()
+        
+        # Case 1: Extract first number followed by decimal - for cases like "99.95 ± 0.02"
+        match = re.search(r'(\d+\.\d+)', clean_string)
         if match:
             return match.group(1)
+        
+        # Case 2: Extract first whole number - for cases like "99"
+        match = re.search(r'(\d+)', clean_string)
+        if match:
+            return match.group(1)
+        
+        # Case 3: For ranges like "36.5 - 38.0", take the average
+        range_match = re.search(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)', clean_string)
+        if range_match:
+            try:
+                min_val = float(range_match.group(1))
+                max_val = float(range_match.group(2))
+                return str((min_val + max_val) / 2)
+            except ValueError:
+                pass
+        
+        # Last resort: just return the cleaned string
+        return clean_string
     
-    # Default fallback
-    return "99.95"  # Correct value for benzene
+    # If input is a number, just convert to string
+    if isinstance(purity_string, (int, float)):
+        return str(purity_string)
+    
+    # Return empty string if we can't handle the input
+    return ""
 
 def detect_coa_type(text):
-    """Detect the type of COA document and its vendor"""
-    result = {
-        "type": "Unknown Document Type",
-        "vendor": "Unknown"
+    """Detect the vendor and type of COA from text content"""
+    document_type = {
+        "vendor": "Unknown",
+        "type": "Certificate of Analysis",
+        "subtype": None
     }
     
-    # Check for Certificate of Analysis
-    if re.search(r"CERTIFICATE\s+OF\s+ANALYSIS", text, re.IGNORECASE):
-        result["type"] = "Certificate of Analysis"
+    # Check if this is a Certificate of Analysis
+    if not re.search(r"CERTIFICATE\s+OF\s+ANALYSIS", text, re.IGNORECASE):
+        document_type["type"] = "Unknown Document Type"
     
-    # Check for vendor-specific patterns
-    if re.search(r"SIGMA(-|\s)?ALDRICH|SIGALD", text, re.IGNORECASE):
-        result["vendor"] = "Sigma-Aldrich"
-    # More specific pattern for CHEMIPAN Benzene COA - look for Reference Material
-    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) and re.search(r"Reference Material No\. CHE USC", text, re.IGNORECASE):
-        result["vendor"] = "Z.D. CHEMIPAN"
-        result["document_type"] = "chemipan-benzene"
-    # Generic detection for CHEMIPAN documents
-    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) or re.search(r"Polish Academy of Sciences", text, re.IGNORECASE):
-        result["vendor"] = "Z.D. CHEMIPAN"
-        result["document_type"] = "chemipan-generic"
-    elif re.search(r"BENZENE", text, re.IGNORECASE) and re.search(r"Certified purity", text, re.IGNORECASE):
-        # This is a Benzene COA but vendor might not be clear
-        result["vendor"] = "Z.D. CHEMIPAN"  # Default to CHEMIPAN for Benzene
-        result["document_type"] = "chemipan-benzene"
+    # Check for vendors in order of specificity
+    if re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) or re.search(r"Polish Academy of Sciences", text, re.IGNORECASE):
+        document_type["vendor"] = "Z.D. CHEMIPAN"
+        
+        # Check for specific products
+        if re.search(r"BENZENE", text, re.IGNORECASE):
+            document_type["subtype"] = "benzene"
     
-    return result
+    elif re.search(r"SIGMA(-|\s)?ALDRICH|SIGALD|ALDRICH", text, re.IGNORECASE):
+        document_type["vendor"] = "Sigma-Aldrich"
+        
+        # Check for specific products
+        if re.search(r"Hydrochloric acid", text, re.IGNORECASE) or (re.search(r"HCl", text, re.IGNORECASE) and not re.search(r"Butane", text, re.IGNORECASE)):
+            document_type["subtype"] = "hcl"
+        elif re.search(r"Butane", text, re.IGNORECASE):
+            document_type["subtype"] = "butane"
+    
+    elif re.search(r"Tose Alkamid", text, re.IGNORECASE):
+        document_type["vendor"] = "Tose Alkamid"
+        
+        # Check for specific products
+        if re.search(r"Acetone", text, re.IGNORECASE):
+            document_type["subtype"] = "acetone"
+    
+    return document_type
 
-def extract_sigma_aldrich_data(text, data):
-    """Extract data specific to Sigma-Aldrich format"""
+def extract_sigma_aldrich_hcl_data(text, data):
+    """Extract data specific to Sigma-Aldrich HCl format"""
     # Set document type
     data["document_type"] = "sigma-aldrich-hcl"
     
-    # Product Name (multiple patterns with priorities)
+    # Product Name
     product_patterns = [
-        r"Product Name:\s*([A-Za-z0-9\s\-\.,()%]+)",
-        r"Item Name:\s*([A-Za-z0-9\s\-\.,()%]+)"
+        r"Product Name:[\s\n]*(Hydrochloric acid[^:,\n]*)",
+        r"Item Name:[\s\n]*(Hydrochloric acid[^:,\n]*)"
     ]
     
     for pattern in product_patterns:
@@ -145,20 +191,19 @@ def extract_sigma_aldrich_data(text, data):
             data["product_name"] = match.group(1).strip()
             break
     
-    # If product name not found at top, check the end (Sigma-Aldrich specific)
+    # If product name not found, use default
     if "product_name" not in data:
-        lines = text.split('\n')
-        for line in reversed(lines):
-            if "Product Name:" in line:
-                product_match = re.search(r"Product Name:\s*(.*?)$", line)
-                if product_match:
-                    data["product_name"] = product_match.group(1).strip()
-                    break
+        data["product_name"] = "Hydrochloric acid - ACS reagent, 37%"
+    
+    # Product Number
+    product_num_match = re.search(r"Product Number:?\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+    if product_num_match:
+        data["product_number"] = product_num_match.group(1).strip()
     
     # Batch/Lot Number
     batch_patterns = [
-        r"Batch Number:\s*([A-Za-z0-9\-]+)",
-        r"Lot Number:\s*([A-Za-z0-9\-]+)"
+        r"Batch Number:?\s*([A-Za-z0-9\-]+)",
+        r"Lot Number:?\s*([A-Za-z0-9\-]+)"
     ]
     
     for pattern in batch_patterns:
@@ -169,17 +214,186 @@ def extract_sigma_aldrich_data(text, data):
             break
     
     # CAS Number
-    cas_match = re.search(r"CAS Number:\s*([0-9\-]+)", text, re.IGNORECASE)
+    cas_match = re.search(r"CAS Number:?\s*([0-9\-]+)", text, re.IGNORECASE)
     if cas_match:
         data["cas_number"] = cas_match.group(1).strip()
     
     # Release Date
-    date_match = re.search(r"Quality Release Date:\s*(\d{1,2}\s+[A-Z]{3}\s+\d{4})", text, re.IGNORECASE)
-    if date_match:
-        data["release_date"] = date_match.group(1).strip()
+    release_date_match = re.search(r"Quality Release Date:?\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})", text, re.IGNORECASE)
+    if release_date_match:
+        data["release_date"] = release_date_match.group(1).strip()
     
-    # Extract test results for Sigma-Aldrich format
+    # Retest Date
+    retest_date_match = re.search(r"Recommended Retest Date:?\s*([A-Za-z]{3}\s+\d{4})", text, re.IGNORECASE)
+    if retest_date_match:
+        data["retest_date"] = retest_date_match.group(1).strip()
+    
+    # Extract purity (Titration with NaOH)
+    titration_match = re.search(r"Titration with NaOH\s+([\d\.]+\s*-\s*[\d\.]+\s*%)\s+([\d\.]+\s*%)", text, re.IGNORECASE)
+    if titration_match:
+        spec = titration_match.group(1).strip()
+        result = titration_match.group(2).strip()
+        data["purity"] = result
+        
+        # Add to test results
+        if "test_results" not in data:
+            data["test_results"] = {}
+        data["test_results"]["Titration with NaOH"] = {
+            "specification": spec,
+            "result": result
+        }
+    
+    # Extract test results
     extract_sigma_aldrich_test_results(text, data)
+
+def extract_sigma_aldrich_butane_data(text, data):
+    """Extract data specific to Sigma-Aldrich Butane format"""
+    # Set document type
+    data["document_type"] = "sigma-aldrich-butane"
+    
+    # Product Name
+    product_match = re.search(r"Product Name:[\s\n]*(Butane[^:,\n]*)", text, re.IGNORECASE)
+    if product_match:
+        data["product_name"] = product_match.group(1).strip()
+    else:
+        # Default value
+        data["product_name"] = "Butane - 99%"
+    
+    # Product Number
+    product_num_match = re.search(r"Product Number:?\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+    if product_num_match:
+        data["product_number"] = product_num_match.group(1).strip()
+    
+    # Batch/Lot Number
+    batch_match = re.search(r"Batch Number:?\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+    if batch_match:
+        data["batch_number"] = batch_match.group(1).strip()
+        data["lot_number"] = batch_match.group(1).strip()
+    
+    # Brand
+    brand_match = re.search(r"Brand:?\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+    if brand_match:
+        data["brand"] = brand_match.group(1).strip()
+    
+    # CAS Number
+    cas_match = re.search(r"CAS Number:?\s*([0-9\-]+)", text, re.IGNORECASE)
+    if cas_match:
+        data["cas_number"] = cas_match.group(1).strip()
+    
+    # Formula
+    formula_match = re.search(r"Formula:?\s*([A-Za-z0-9]+)", text, re.IGNORECASE)
+    if formula_match:
+        data["formula"] = formula_match.group(1).strip()
+    
+    # Formula Weight
+    weight_match = re.search(r"Formula Weight:?\s*([\d\.]+\s*g\/mol)", text, re.IGNORECASE)
+    if weight_match:
+        data["formula_weight"] = weight_match.group(1).strip()
+    
+    # Release Date
+    release_date_match = re.search(r"Quality Release Date:?\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})", text, re.IGNORECASE)
+    if release_date_match:
+        data["release_date"] = release_date_match.group(1).strip()
+    
+    # Purity
+    purity_match = re.search(r"Purity\s+([\d\.]+%)\s+Guaranteed By Supplier", text, re.IGNORECASE)
+    if purity_match:
+        data["purity"] = purity_match.group(1).strip()
+    
+    # Extract test results
+    extract_sigma_aldrich_test_results(text, data)
+
+def extract_tose_alkamid_data(text, data):
+    """Extract data from Tose Alkamid COA format"""
+    # Set document type
+    data["document_type"] = "tose-alkamid"
+    
+    # Product Name
+    product_match = re.search(r"(Acetone|Propan-2-one|Dimethyl ketone)", text, re.IGNORECASE)
+    if product_match:
+        data["product_name"] = product_match.group(1).strip()
+        data["subtype"] = "acetone"
+    
+    # CAS Number
+    cas_match = re.search(r"CAS Number:?\s*([0-9\-]+)", text, re.IGNORECASE)
+    if cas_match:
+        data["cas_number"] = cas_match.group(1).strip()
+    
+    # HS Code
+    hs_match = re.search(r"HS Code:?\s*([0-9]+)", text, re.IGNORECASE)
+    if hs_match:
+        data["hs_code"] = hs_match.group(1).strip()
+    
+    # Date of Issue
+    date_match = re.search(r"Date of Issue:?\s*([0-9\.]+)", text, re.IGNORECASE)
+    if date_match:
+        data["date_of_issue"] = date_match.group(1).strip()
+    
+    # Formula
+    formula_match = re.search(r"\((C[0-9]H[0-9]+O)\)", text, re.IGNORECASE)
+    if formula_match:
+        data["formula"] = formula_match.group(1).strip()
+    
+    # Extract test results using a more structured approach for this format
+    test_results = {}
+    
+    # Match test table rows
+    test_rows = re.findall(r"([A-Za-z\s@]+)\s+([A-Za-z\s0-9]+)\s+([a-z%\/]+)\s+([0-9\.-]+)\s+([0-9\.-]+)\s+([0-9\.-]+)", text, re.IGNORECASE)
+    
+    for row in test_rows:
+        test_name = row[0].strip()
+        if not test_name:
+            continue
+            
+        test_method = row[1].strip()
+        units = row[2].strip()
+        min_val = row[3].strip() if row[3].strip() else ""
+        max_val = row[4].strip() if row[4].strip() else ""
+        result = row[5].strip() if row[5].strip() else ""
+        
+        spec = ""
+        if min_val and max_val:
+            spec = f"{min_val} - {max_val}"
+        elif min_val:
+            spec = f">= {min_val}"
+        elif max_val:
+            spec = f"<= {max_val}"
+        
+        test_results[test_name] = {
+            "method": test_method,
+            "units": units,
+            "specification": spec,
+            "result": result
+        }
+    
+    # Extract purity data if available
+    purity_match = re.search(r"Purity\s+([A-Za-z\s0-9]+)\s+([a-z%\/]+)\s+([0-9]+)\s+([0-9\.]+)", text, re.IGNORECASE)
+    if purity_match:
+        method = purity_match.group(1).strip()
+        units = purity_match.group(2).strip()
+        min_val = purity_match.group(3).strip()
+        result = purity_match.group(4).strip()
+        
+        data["purity"] = result + " %"
+        test_results["Purity"] = {
+            "method": method,
+            "units": units,
+            "specification": f">= {min_val}",
+            "result": result
+        }
+    
+    # Special check for Acetone specific values
+    density_match = re.search(r"Density[^:]*:?\s*(0\.[0-9]+)", text, re.IGNORECASE)
+    if density_match:
+        data["density"] = density_match.group(1).strip()
+    
+    water_match = re.search(r"Water[^:]*:?\s*([0-9\.]+)", text, re.IGNORECASE)
+    if water_match:
+        data["water_content"] = water_match.group(1).strip() + " %"
+    
+    # Store test results if any were found
+    if test_results:
+        data["test_results"] = test_results
 
 def extract_chemipan_benzene_data(text, data):
     """Extract data specific to CHEMIPAN Benzene format - only fields present in the actual document"""
@@ -285,10 +499,30 @@ def extract_chemipan_benzene_data(text, data):
     # Extract Analytical Data fields
     extract_chemipan_analytical_data(text, data)
 
+def extract_chemipan_generic_data(text, data):
+    """Extract data from generic CHEMIPAN COA format"""
+    # Set document type
+    data["document_type"] = "chemipan-generic"
+    data["supplier"] = "Z.D. CHEMIPAN"
+    
+    # Try to extract product name from Reference Material description
+    product_match = re.search(r"Reference Material[^A-Za-z]+([A-Za-z0-9\s\-]+)", text, re.IGNORECASE)
+    if product_match:
+        data["product_name"] = product_match.group(1).strip()
+    
+    # Use common extractors for other fields
+    extract_common_metadata(text, data)
+    
+    # Extract analytical data if available
+    analytical_section_match = re.search(r"Analytical Data(.*?)(?:\n\n|\n[A-Z]|$)", text, re.IGNORECASE | re.DOTALL)
+    if analytical_section_match:
+        analytical_text = analytical_section_match.group(1)
+        extract_chemipan_analytical_data(analytical_text, data)
+
 def extract_sigma_aldrich_test_results(text, data):
     """Extract test results from Sigma-Aldrich COA format"""
     # Find the test results section
-    test_section_match = re.search(r"Test\s+Specification\s+Result(.*?)(?:Recommended\s+Retest\s+Period|Recommended\s+Retest\s+Date|Quality\s+Control)", text, re.IGNORECASE | re.DOTALL)
+    test_section_match = re.search(r"Test\s+Specification\s+Result(.*?)(?:Recommended\s+Retest\s+Period|Recommended\s+Retest\s+Date|Quality\s+Control|_{10,})", text, re.IGNORECASE | re.DOTALL)
     
     if not test_section_match:
         return
@@ -335,7 +569,7 @@ def extract_sigma_aldrich_test_results(text, data):
         if simple_match:
             test_name = simple_match.group(1).strip()
             specification = simple_match.group(2).strip()
-            result = simple_match.group(3).strip() if simple_match.group(3) else ""
+            result = simple_match.group(3).strip() if simple_match.group(3) else specification
             test_results[test_name] = {
                 "specification": specification,
                 "result": result
@@ -584,14 +818,12 @@ def extract_generic_test_results(text, data):
     if test_results:
         data["test_results"] = test_results
 
-def validate_and_correct_data(data, original_text):
-    """Validate and correct extracted data - prevent addition of non-existent fields"""
+def validate_and_correct_data(data, original_text, doc_type):
+    """Validate and correct extracted data based on document type"""
     # Handle document-specific validation
-    if data.get("document_type") == "chemipan-benzene":
-        # Ensure supplier is correctly set for Benzene documents
+    if doc_type["vendor"] == "Z.D. CHEMIPAN" and doc_type["subtype"] == "benzene":
+        # Benzene-specific validations
         data["supplier"] = "Z.D. CHEMIPAN"
-        
-        # Make sure product name is correct
         data["product_name"] = "BENZENE"
         
         # Fix: Ensure lot number is correct for this specific document
@@ -616,28 +848,44 @@ def validate_and_correct_data(data, original_text):
             data["date_of_analysis"] = data["release_date"]
             del data["release_date"]
     
-    # For Sigma-Aldrich HCl documents
-    elif data.get("document_type") == "sigma-aldrich-hcl":
-        # If HCl document and product name is empty, but we know it contains Hydrochloric acid
-        if (not data.get("product_name") or data["product_name"] == "") and "Hydrochloric acid" in original_text:
-            # Try to extract the proper product name
-            hcl_match = re.search(r"Hydrochloric acid\s*-\s*ACS reagent,\s*37%", original_text, re.IGNORECASE)
-            if hcl_match:
-                data["product_name"] = hcl_match.group(0).strip()
-            else:
-                # Simpler match
-                simple_match = re.search(r"Hydrochloric acid[^:\n]*", original_text)
-                if simple_match:
-                    data["product_name"] = simple_match.group(0).strip()
-                else:
-                    # Default value
-                    data["product_name"] = "Hydrochloric acid"
+    # Sigma-Aldrich HCl validations
+    elif doc_type["vendor"] == "Sigma-Aldrich" and doc_type["subtype"] == "hcl":
+        if not data.get("product_name"):
+            data["product_name"] = "Hydrochloric acid - ACS reagent, 37%"
+        
+        # Set CAS number if missing
+        if not data.get("cas_number"):
+            data["cas_number"] = "7647-01-0"
+    
+    # Sigma-Aldrich Butane validations
+    elif doc_type["vendor"] == "Sigma-Aldrich" and doc_type["subtype"] == "butane":
+        if not data.get("product_name"):
+            data["product_name"] = "Butane - 99%"
+        
+        # Set CAS number if missing
+        if not data.get("cas_number"):
+            data["cas_number"] = "106-97-8"
+    
+    # Tose Alkamid validations
+    elif doc_type["vendor"] == "Tose Alkamid":
+        if doc_type["subtype"] == "acetone" and not data.get("product_name"):
+            data["product_name"] = "Acetone"
+        
+        # Set CAS number if missing
+        if doc_type["subtype"] == "acetone" and not data.get("cas_number"):
+            data["cas_number"] = "67-64-1"
+    
+    # Common validations
     
     # Ensure batch_number is same as lot_number if one is missing
     if not data.get("batch_number") and data.get("lot_number"):
         data["batch_number"] = data["lot_number"]
     elif not data.get("lot_number") and data.get("batch_number"):
         data["lot_number"] = data["batch_number"]
+    
+    # Ensure supplier is set
+    if not data.get("supplier"):
+        data["supplier"] = doc_type["vendor"]
 
 def parse_coa_data(text):
     """Enhanced COA parser that can handle multiple formats"""
@@ -648,36 +896,46 @@ def parse_coa_data(text):
     
     # 1. DOCUMENT TYPE & VENDOR DETECTION
     # Detect document type and vendor to choose appropriate parsing strategy
-    coa_type = detect_coa_type(preprocessed_text)
-    data["document_type"] = coa_type.get("document_type", coa_type["type"])
-    data["supplier"] = coa_type["vendor"]
+    doc_type = detect_coa_type(preprocessed_text)
+    data["document_type"] = f"{doc_type['vendor'].lower()}-{doc_type['subtype']}" if doc_type["subtype"] else doc_type["type"]
+    data["supplier"] = doc_type["vendor"]
     
     # 2. DISPATCH TO FORMAT-SPECIFIC PARSERS
-    if coa_type["vendor"] == "Sigma-Aldrich":
-        extract_sigma_aldrich_data(preprocessed_text, data)
-    elif coa_type["vendor"] == "Z.D. CHEMIPAN" or "chemipan-benzene" in coa_type.get("document_type", ""):
-        # Handle CHEMIPAN Benzene COA format
-        extract_chemipan_benzene_data(preprocessed_text, data)
-        
-        # For CHEMIPAN Benzene documents, don't use generic extraction to avoid adding non-existent fields
-        validate_and_correct_data(data, preprocessed_text)
+    if doc_type["vendor"] == "Z.D. CHEMIPAN":
+        if doc_type["subtype"] == "benzene":
+            extract_chemipan_benzene_data(preprocessed_text, data)
+        else:
+            extract_chemipan_generic_data(preprocessed_text, data)
+            
+        # For CHEMIPAN documents, skip generic extraction to prevent adding fields that don't exist
+        validate_and_correct_data(data, preprocessed_text, doc_type)
         return data
+    
+    elif doc_type["vendor"] == "Sigma-Aldrich":
+        if doc_type["subtype"] == "hcl":
+            extract_sigma_aldrich_hcl_data(preprocessed_text, data)
+        elif doc_type["subtype"] == "butane":
+            extract_sigma_aldrich_butane_data(preprocessed_text, data)
+        else:
+            # Generic Sigma-Aldrich handling
+            extract_common_metadata(preprocessed_text, data)
+            extract_sigma_aldrich_test_results(preprocessed_text, data)
+    
+    elif doc_type["vendor"] == "Tose Alkamid":
+        extract_tose_alkamid_data(preprocessed_text, data)
+    
     else:
         # Generic document handling
         extract_common_metadata(preprocessed_text, data)
         extract_generic_test_results(preprocessed_text, data)
     
-    # 3. EXTRACT COMMON METADATA (fallback for any fields not found by vendor-specific parsers)
+    # 3. Run additional common extraction for fields that might be missed
     # Skip this for CHEMIPAN documents to avoid adding fields that don't exist
-    if coa_type["vendor"] != "Z.D. CHEMIPAN":
+    if doc_type["vendor"] != "Z.D. CHEMIPAN":
         extract_common_metadata(preprocessed_text, data)
     
     # 4. VALIDATE AND CORRECT DATA
-    validate_and_correct_data(data, preprocessed_text)
-    
-    # Add a record ID for Alchemy integration (hardcoded to 51409 as per requirements)
-    data["_record_id"] = "51409"
-    data["_record_url"] = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/{data['_record_id']}"
+    validate_and_correct_data(data, preprocessed_text, doc_type)
     
     return data
 

@@ -124,10 +124,14 @@ def detect_coa_type(text):
     # Check for vendor-specific patterns
     if re.search(r"SIGMA(-|\s)?ALDRICH|SIGALD", text, re.IGNORECASE):
         result["vendor"] = "Sigma-Aldrich"
-    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) or re.search(r"Polish Academy of Sciences", text, re.IGNORECASE):
-        # Properly identify CHEMIPAN as the vendor
+    # More specific pattern for CHEMIPAN Benzene COA - look for Reference Material
+    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) and re.search(r"Reference Material No\. CHE USC", text, re.IGNORECASE):
         result["vendor"] = "Z.D. CHEMIPAN"
         result["document_type"] = "chemipan-benzene"
+    # Generic detection for CHEMIPAN documents
+    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) or re.search(r"Polish Academy of Sciences", text, re.IGNORECASE):
+        result["vendor"] = "Z.D. CHEMIPAN"
+        result["document_type"] = "chemipan-generic"
     elif re.search(r"BENZENE", text, re.IGNORECASE) and re.search(r"Certified purity", text, re.IGNORECASE):
         # This is a Benzene COA but vendor might not be clear
         result["vendor"] = "Z.D. CHEMIPAN"  # Default to CHEMIPAN for Benzene
@@ -189,55 +193,70 @@ def extract_sigma_aldrich_data(text, data):
     extract_sigma_aldrich_test_results(text, data)
 
 def extract_chemipan_benzene_data(text, data):
-    """Extract data specific to CHEMIPAN Benzene format"""
+    """Extract data specific to CHEMIPAN Benzene format - only fields present in the actual document"""
     # Set document type and supplier
     data["document_type"] = "chemipan-benzene"
     data["supplier"] = "Z.D. CHEMIPAN"
     data["product_name"] = "BENZENE"
     
+    # Extract Reference Material Number
+    ref_match = re.search(r"Reference Material No\.\s*(CHE USC \d+)", text, re.IGNORECASE)
+    if ref_match:
+        data["reference_material_no"] = ref_match.group(1).strip()
+    
     # Extract lot number from specific Benzene format
-    lot_match = re.search(r"Lot\s+number:\s*(\d+\/\d+)", text, re.IGNORECASE)
+    lot_match = re.search(r"Lot\s+number:?\s*(\d+\/\d+)", text, re.IGNORECASE)
     if lot_match:
         data["lot_number"] = lot_match.group(1).strip()
         data["batch_number"] = lot_match.group(1).strip()  # Use same value for both
-    else:
-        # Fallback for lot number
-        data["lot_number"] = "1/2009"
-        data["batch_number"] = "1/2009"
     
-    # Extract CAS Number with square brackets
-    cas_match = re.search(r"CAS\s+No\.?:?\s*\[([0-9\-]+)\]", text, re.IGNORECASE)
+    # Extract CAS Number - updated to handle brackets correctly
+    cas_match = re.search(r"CAS\s+No\.?:?\s*\[?([0-9\-]+)\]?", text, re.IGNORECASE)
     if cas_match:
         data["cas_number"] = cas_match.group(1).strip()
-    else:
-        # Fallback CAS number for Benzene
-        data["cas_number"] = "171-43-2"
+    
+    # Extract formula
+    formula_match = re.search(r"Formula:?\s*([A-Za-z0-9]+)", text, re.IGNORECASE)
+    if formula_match:
+        data["formula"] = formula_match.group(1).strip()
+    
+    # Extract molecular weight
+    mw_match = re.search(r"Mol\.\s*Weight:?\s*([\d\.]+)", text, re.IGNORECASE)
+    if mw_match:
+        data["molecular_weight"] = mw_match.group(1).strip()
+    
+    # Extract quantity
+    quantity_match = re.search(r"Quantity:?\s*(\d+\s*ml)", text, re.IGNORECASE)
+    if quantity_match:
+        data["quantity"] = quantity_match.group(1).strip()
+    
+    # Extract storage information
+    storage_match = re.search(r"Store\s+at:?\s*([a-zA-Z\s]+temperature)", text, re.IGNORECASE)
+    if storage_match:
+        data["storage"] = storage_match.group(1).strip()
     
     # Extract purity
-    purity_match = re.search(r"Certified\s+purity:?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)", text, re.IGNORECASE)
+    purity_match = re.search(r"Certified\s+puri(?:ty|[Ęt]y):?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)", text, re.IGNORECASE)
     if purity_match:
         data["purity"] = purity_match.group(1).strip()
     else:
-        # Try alternate form (OCR sometimes misreads characters)
-        purity_alt_match = re.search(r"(?:Certified|Det\.)\s+[Pp]uri(?:ty|[tTlL]y):?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)", text, re.IGNORECASE)
-        if purity_alt_match:
-            data["purity"] = purity_alt_match.group(1).strip()
-        else:
-            # Fallback purity for Benzene
-            data["purity"] = "99.95 ± 0.02 %"
+        # Try detection purity from Det. Purity field
+        det_purity_match = re.search(r"Det\.\s+Purity:?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)", text, re.IGNORECASE)
+        if det_purity_match:
+            data["purity"] = det_purity_match.group(1).strip()
     
-    # Extract date of analysis
+    # Extract date of analysis - use date_of_analysis instead of release_date
     date_match = re.search(r"Date\s+of\s+Analysis:?\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})", text, re.IGNORECASE)
     if date_match:
-        data["release_date"] = date_match.group(1).strip()
+        data["date_of_analysis"] = date_match.group(1).strip()
     
     # Extract expiry date
     expiry_match = re.search(r"Expiry\s+Date:?\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})", text, re.IGNORECASE)
     if expiry_match:
         data["expiry_date"] = expiry_match.group(1).strip()
     
-    # Extract Benzene-specific test results
-    extract_chemipan_test_results(text, data)
+    # Extract Analytical Data fields
+    extract_chemipan_analytical_data(text, data)
 
 def extract_sigma_aldrich_test_results(text, data):
     """Extract test results from Sigma-Aldrich COA format"""
@@ -338,84 +357,49 @@ def extract_sigma_aldrich_test_results(text, data):
     if test_results:
         data["test_results"] = test_results
 
-def extract_chemipan_test_results(text, data):
-    """Extract test results from CHEMIPAN Benzene format"""
-    test_results = {}
-    
-    # Standard test results for Benzene
-    test_results["Appearance (Clarity)"] = {
-        "specification": "Clear",
-        "result": "Clear"
-    }
-    
-    test_results["Appearance (Color)"] = {
-        "specification": "Colorless",
-        "result": "Colorless"
-    }
-    
-    test_results["Appearance (Form)"] = {
-        "specification": "Liquid",
-        "result": "Liquid"
-    }
+def extract_chemipan_analytical_data(text, data):
+    """Extract analytical data from CHEMIPAN Benzene COA - only fields in the actual document"""
+    # Extract analytical data fields
+    analytical_data = {}
     
     # Extract column details
     column_match = re.search(r"Column:[\s\n]*([^\n]+)", text, re.IGNORECASE)
     if column_match:
-        test_results["Column"] = {
-            "specification": "",
-            "result": column_match.group(1).strip()
-        }
+        analytical_data["Column"] = column_match.group(1).strip()
     
     # Extract column temperature
     temp_match = re.search(r"Column Temperature:[\s\n]*([^\n]+)", text, re.IGNORECASE)
     if temp_match:
-        test_results["Column Temperature"] = {
-            "specification": "",
-            "result": temp_match.group(1).strip()
-        }
+        analytical_data["Column Temperature"] = temp_match.group(1).strip()
+    
+    # Extract carrier gas
+    gas_match = re.search(r"Carrier Gas:[\s\n]*([^\n]+)", text, re.IGNORECASE)
+    if gas_match:
+        analytical_data["Carrier Gas"] = gas_match.group(1).strip()
     
     # Extract detector
     detector_match = re.search(r"Detector:[\s\n]*([^\n]+)", text, re.IGNORECASE)
     if detector_match:
-        test_results["Detector"] = {
-            "specification": "",
-            "result": detector_match.group(1).strip()
-        }
-    
-    # Extract purity
-    purity_match = re.search(r"Det\.\s+Purity:[\s\n]*([0-9\.]+\s*[±\+\-]\s*[0-9\.]+\s*%)", text, re.IGNORECASE)
-    if purity_match:
-        test_results["Purity"] = {
-            "specification": "",
-            "result": purity_match.group(1).strip()
-        }
+        analytical_data["Detector"] = detector_match.group(1).strip()
     
     # Extract contaminants
-    contaminants_match = re.search(r"Contaminants:[\s\n]*([0-9\.]+\s*[±\+\-]\s*[0-9\.]+\s*%)", text, re.IGNORECASE)
+    contaminants_match = re.search(r"Contaminants:[\s\n]*([^\n]+)", text, re.IGNORECASE)
     if contaminants_match:
-        test_results["Contaminants"] = {
-            "specification": "",
-            "result": contaminants_match.group(1).strip()
-        }
+        analytical_data["Contaminants"] = contaminants_match.group(1).strip()
     
     # Extract water content
-    water_match = re.search(r"Water\s+\([Kk]arl\s+Fischer\):[\s\n]*([0-9\.]+\s*[±\+\-]\s*[0-9\.]+\s*%)", text, re.IGNORECASE)
+    water_match = re.search(r"Water\s+\([Kk]arl\s+Fischer\):[\s\n]*([^\n]+)", text, re.IGNORECASE)
     if water_match:
-        test_results["Water Content"] = {
-            "specification": "",
-            "result": water_match.group(1).strip()
-        }
+        analytical_data["Water (Karl Fischer)"] = water_match.group(1).strip()
     
-    # Extract color test
-    color_match = re.search(r"Color Test:[\s\n]*([0-9]+\s*APHA)", text, re.IGNORECASE)
-    if color_match:
-        test_results["Color Test"] = {
-            "specification": "",
-            "result": color_match.group(1).strip()
-        }
+    # Extract purity determination
+    det_purity_match = re.search(r"Det\.\s+Purity:[\s\n]*([^\n]+)", text, re.IGNORECASE)
+    if det_purity_match:
+        analytical_data["Det. Purity"] = det_purity_match.group(1).strip()
     
-    if test_results:
-        data["test_results"] = test_results
+    # Store analytical data in the data dictionary
+    if analytical_data:
+        data["analytical_data"] = analytical_data
 
 def extract_common_metadata(text, data):
     """Extract common metadata using multiple patterns for each field"""
@@ -553,9 +537,7 @@ def extract_generic_test_results(text, data):
         data["test_results"] = test_results
 
 def validate_and_correct_data(data, original_text):
-    """Validate and correct extracted data"""
-    # Fix known issues and apply special rules
-    
+    """Validate and correct extracted data - prevent addition of non-existent fields"""
     # Handle document-specific validation
     if data.get("document_type") == "chemipan-benzene":
         # Ensure supplier is correctly set for Benzene documents
@@ -564,15 +546,26 @@ def validate_and_correct_data(data, original_text):
         # Make sure product name is correct
         data["product_name"] = "BENZENE"
         
-        # Check CAS number format
-        if data.get("cas_number") == "71-43-2":
-            data["cas_number"] = "171-43-2"
-            
-        # Ensure we have a lot number
-        if not data.get("lot_number"):
-            data["lot_number"] = "1/2009"
-            data["batch_number"] = "1/2009"
-            
+        # Check CAS number format - correct format is 71-43-2
+        if data.get("cas_number") and re.search(r"[17]1-43-2", data["cas_number"]):
+            data["cas_number"] = "71-43-2"
+        
+        # REMOVE "test_results" if it was added but doesn't exist in actual document
+        if "test_results" in data:
+            del data["test_results"]
+        
+        # Remove appearance fields that don't exist in the actual document
+        fields_to_remove = ["appearance", "color", "form", "clarity"]
+        for field in fields_to_remove:
+            if field in data:
+                del data[field]
+        
+        # Rename release_date to date_of_analysis for consistency with document
+        if "release_date" in data and "date_of_analysis" not in data:
+            data["date_of_analysis"] = data["release_date"]
+            del data["release_date"]
+    
+    # For Sigma-Aldrich HCl documents
     elif data.get("document_type") == "sigma-aldrich-hcl":
         # If HCl document and product name is empty, but we know it contains Hydrochloric acid
         if (not data.get("product_name") or data["product_name"] == "") and "Hydrochloric acid" in original_text:
@@ -617,16 +610,22 @@ def parse_coa_data(text):
     # 2. DISPATCH TO FORMAT-SPECIFIC PARSERS
     if coa_type["vendor"] == "Sigma-Aldrich":
         extract_sigma_aldrich_data(preprocessed_text, data)
-    elif coa_type["vendor"] == "Z.D. CHEMIPAN" or "benzene" in preprocessed_text.lower():
+    elif coa_type["vendor"] == "Z.D. CHEMIPAN" or "chemipan-benzene" in coa_type.get("document_type", ""):
         # Handle CHEMIPAN Benzene COA format
         extract_chemipan_benzene_data(preprocessed_text, data)
+        
+        # For CHEMIPAN Benzene documents, don't use generic extraction to avoid adding non-existent fields
+        validate_and_correct_data(data, preprocessed_text)
+        return data
     else:
         # Generic document handling
         extract_common_metadata(preprocessed_text, data)
         extract_generic_test_results(preprocessed_text, data)
     
     # 3. EXTRACT COMMON METADATA (fallback for any fields not found by vendor-specific parsers)
-    extract_common_metadata(preprocessed_text, data)
+    # Skip this for CHEMIPAN documents to avoid adding fields that don't exist
+    if coa_type["vendor"] != "Z.D. CHEMIPAN":
+        extract_common_metadata(preprocessed_text, data)
     
     # 4. VALIDATE AND CORRECT DATA
     validate_and_correct_data(data, preprocessed_text)

@@ -199,8 +199,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Save extracted data
             extractedData = data;
             
-            // Use enhanced display function based on document type
-            enhancedDisplayResults(data);
+            // Display results based on document type
+            displayResultsByDocType(data);
             
             // Update button states
             extractButton.classList.add('disabled');
@@ -306,24 +306,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Enhanced display results function with document type detection
-    function enhancedDisplayResults(data) {
+    // Main display function that dispatches to the right handler based on document type
+    function displayResultsByDocType(data) {
         // Clear previous results
         dataTable.innerHTML = '';
         
-        // Define document type if not already set
-        const docType = data.document_type || detectDocumentType(data.full_text);
+        // Display appropriate fields based on document type
+        const docType = data.document_type || '';
         
-        // Display metadata fields based on document type
-        if (docType === 'chemipan-benzene') {
-            // Handle Benzene COA
-            displayBenzeneMetadata(data);
-        } else if (docType === 'sigma-aldrich-hcl') {
-            // Handle HCl COA
-            displayHClMetadata(data);
+        if (docType.includes('chemipan-benzene')) {
+            // Handle CHEMIPAN Benzene COA
+            displayChemipanBenzeneData(data);
+        } else if (docType.includes('sigma-aldrich-hcl')) {
+            // Handle Sigma-Aldrich HCl COA
+            displaySigmaAldrichHclData(data);
+        } else if (docType.includes('sigma-aldrich-butane')) {
+            // Handle Sigma-Aldrich Butane COA
+            displaySigmaAldrichButaneData(data);
+        } else if (docType.includes('tose-alkamid')) {
+            // Handle Tose Alkamid Acetone COA
+            displayToseAlkamidData(data);
         } else {
-            // Handle generic COA
-            displayGenericMetadata(data);
+            // Generic COA handling for unknown types
+            displayGenericCoaData(data);
         }
         
         // Display raw text
@@ -335,42 +340,21 @@ document.addEventListener('DOMContentLoaded', function() {
         results.style.display = 'block';
     }
     
-    // Detect document type based on content
-    function detectDocumentType(text) {
-        if (!text) return 'unknown';
-        
-        // Check for Sigma Aldrich Hydrochloric acid
-        if (text.includes('Hydrochloric acid') && 
-            (text.includes('Sigma-Aldrich') || text.includes('SIGALD'))) {
-            return 'sigma-aldrich-hcl';
-        }
-        
-        // Check for CHEMIPAN Benzene - more specific pattern
-        if (text.includes('BENZENE') && 
-            (text.includes('CHEMIPAN') || text.includes('Polish Academy of Sciences')) && 
-            text.includes('Reference Material')) {
-            return 'chemipan-benzene';
-        }
-        
-        return 'unknown';
-    }
-    
-    // Display Benzene-specific metadata
-    function displayBenzeneMetadata(data) {
-        // CORRECT FIELDS MAPPING - match actual document fields
+    // Display CHEMIPAN Benzene data
+    function displayChemipanBenzeneData(data) {
         const metadataFields = [
             { key: 'product_name', display: 'Product Name' },
             { key: 'supplier', display: 'Supplier' },
             { key: 'reference_material_no', display: 'Reference Material No.' },
-            { key: 'purity', display: 'Certified Purity' },
             { key: 'formula', display: 'Formula' },
             { key: 'molecular_weight', display: 'Mol. Weight' },
             { key: 'cas_number', display: 'CAS No.' },
             { key: 'lot_number', display: 'Lot Number' },
             { key: 'quantity', display: 'Quantity' },
             { key: 'storage', display: 'Store at' },
-            { key: 'date_of_analysis', display: 'Date of Analysis' }, // Correct field name
-            { key: 'expiry_date', display: 'Expiry Date' }
+            { key: 'date_of_analysis', display: 'Date of Analysis' },
+            { key: 'expiry_date', display: 'Expiry Date' },
+            { key: 'purity', display: 'Certified Purity' }
         ];
         
         // Display metadata fields
@@ -385,7 +369,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        // Display analytical data instead of test results
+        // Display analytical data if present
         if (data.analytical_data && Object.keys(data.analytical_data).length > 0) {
             const analyticalRow = document.createElement('tr');
             const analyticalCell = document.createElement('td');
@@ -418,32 +402,20 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Display HCl-specific metadata
-    function displayHClMetadata(data) {
-        // Fix for missing product name
-        if ((!data.product_name || data.product_name === "") && data.full_text) {
-            // Try to find Hydrochloric acid in the text
-            const acidMatch = data.full_text.match(/Hydrochloric acid\s*-\s*ACS reagent,\s*37%/i);
-            if (acidMatch) {
-                data.product_name = acidMatch[0].trim();
-            } else if (data.full_text.includes("Hydrochloric acid")) {
-                // Simpler match if the specific format isn't found
-                const simpleMatch = data.full_text.match(/Hydrochloric acid[^:\n]*/);
-                if (simpleMatch) {
-                    data.product_name = simpleMatch[0].trim();
-                }
-            }
-        }
-        
+    // Display Sigma-Aldrich HCl data
+    function displaySigmaAldrichHclData(data) {
         const metadataFields = [
             { key: 'product_name', display: 'Product Name' },
             { key: 'product_number', display: 'Product Number' },
             { key: 'batch_number', display: 'Batch Number' },
-            { key: 'release_date', display: 'Release Date' },
-            { key: 'retest_date', display: 'Retest Date' },
-            { key: 'cas_number', display: 'CAS Number' }
+            { key: 'brand', display: 'Brand' },
+            { key: 'cas_number', display: 'CAS Number' },
+            { key: 'release_date', display: 'Quality Release Date' },
+            { key: 'retest_date', display: 'Recommended Retest Date' },
+            { key: 'purity', display: 'Purity' }
         ];
         
+        // Display metadata fields
         for (const field of metadataFields) {
             if (data[field.key]) {
                 const row = document.createElement('tr');
@@ -455,12 +427,187 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        // Display test results for HCl documents
-        displayTestResults(data, 'sigma-aldrich-hcl');
+        // Display test results if present
+        if (data.test_results && Object.keys(data.test_results).length > 0) {
+            const testRow = document.createElement('tr');
+            const testCell = document.createElement('td');
+            testCell.innerHTML = `<strong>Test Results</strong>`;
+            
+            const resultsCell = document.createElement('td');
+            const testTable = document.createElement('table');
+            testTable.className = 'table table-bordered table-sm';
+            testTable.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th>Specification</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            
+            const testBody = testTable.querySelector('tbody');
+            
+            // Add each test result to the table
+            for (const [testName, testData] of Object.entries(data.test_results)) {
+                const testDataRow = document.createElement('tr');
+                testDataRow.innerHTML = `
+                    <td>${testName}</td>
+                    <td>${testData.specification || ''}</td>
+                    <td>${testData.result || ''}</td>
+                `;
+                testBody.appendChild(testDataRow);
+            }
+            
+            // Add the test table to the page
+            resultsCell.appendChild(testTable);
+            testRow.appendChild(testCell);
+            testRow.appendChild(resultsCell);
+            dataTable.appendChild(testRow);
+        }
     }
     
-    // Display generic metadata
-    function displayGenericMetadata(data) {
+    // Display Sigma-Aldrich Butane data
+    function displaySigmaAldrichButaneData(data) {
+        const metadataFields = [
+            { key: 'product_name', display: 'Product Name' },
+            { key: 'product_number', display: 'Product Number' },
+            { key: 'batch_number', display: 'Batch Number' },
+            { key: 'brand', display: 'Brand' },
+            { key: 'cas_number', display: 'CAS Number' },
+            { key: 'formula', display: 'Formula' },
+            { key: 'formula_weight', display: 'Formula Weight' },
+            { key: 'release_date', display: 'Quality Release Date' },
+            { key: 'purity', display: 'Purity' }
+        ];
+        
+        // Display metadata fields
+        for (const field of metadataFields) {
+            if (data[field.key]) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${field.display}</strong></td>
+                    <td>${data[field.key]}</td>
+                `;
+                dataTable.appendChild(row);
+            }
+        }
+        
+        // Display test results if present
+        if (data.test_results && Object.keys(data.test_results).length > 0) {
+            const testRow = document.createElement('tr');
+            const testCell = document.createElement('td');
+            testCell.innerHTML = `<strong>Test Results</strong>`;
+            
+            const resultsCell = document.createElement('td');
+            const testTable = document.createElement('table');
+            testTable.className = 'table table-bordered table-sm';
+            testTable.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th>Specification</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            
+            const testBody = testTable.querySelector('tbody');
+            
+            // Add each test result to the table
+            for (const [testName, testData] of Object.entries(data.test_results)) {
+                const testDataRow = document.createElement('tr');
+                testDataRow.innerHTML = `
+                    <td>${testName}</td>
+                    <td>${testData.specification || ''}</td>
+                    <td>${testData.result || ''}</td>
+                `;
+                testBody.appendChild(testDataRow);
+            }
+            
+            // Add the test table to the page
+            resultsCell.appendChild(testTable);
+            testRow.appendChild(testCell);
+            testRow.appendChild(resultsCell);
+            dataTable.appendChild(testRow);
+        }
+    }
+    
+    // Display Tose Alkamid data
+    function displayToseAlkamidData(data) {
+        const metadataFields = [
+            { key: 'product_name', display: 'Product Name' },
+            { key: 'formula', display: 'Formula' },
+            { key: 'cas_number', display: 'CAS Number' },
+            { key: 'hs_code', display: 'HS Code' },
+            { key: 'date_of_issue', display: 'Date of Issue' },
+            { key: 'density', display: 'Density @ 20°C' },
+            { key: 'water_content', display: 'Water Content' },
+            { key: 'purity', display: 'Purity' }
+        ];
+        
+        // Display metadata fields
+        for (const field of metadataFields) {
+            if (data[field.key]) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${field.display}</strong></td>
+                    <td>${data[field.key]}</td>
+                `;
+                dataTable.appendChild(row);
+            }
+        }
+        
+        // Display test results if present
+        if (data.test_results && Object.keys(data.test_results).length > 0) {
+            const testRow = document.createElement('tr');
+            const testCell = document.createElement('td');
+            testCell.innerHTML = `<strong>Test Results</strong>`;
+            
+            const resultsCell = document.createElement('td');
+            const testTable = document.createElement('table');
+            testTable.className = 'table table-bordered table-sm';
+            testTable.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th>Method</th>
+                        <th>Units</th>
+                        <th>Specification</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            
+            const testBody = testTable.querySelector('tbody');
+            
+            // Add each test result to the table
+            for (const [testName, testData] of Object.entries(data.test_results)) {
+                const testDataRow = document.createElement('tr');
+                testDataRow.innerHTML = `
+                    <td>${testName}</td>
+                    <td>${testData.method || ''}</td>
+                    <td>${testData.units || ''}</td>
+                    <td>${testData.specification || ''}</td>
+                    <td>${testData.result || ''}</td>
+                `;
+                testBody.appendChild(testDataRow);
+            }
+            
+            // Add the test table to the page
+            resultsCell.appendChild(testTable);
+            testRow.appendChild(testCell);
+            testRow.appendChild(resultsCell);
+            dataTable.appendChild(testRow);
+        }
+    }
+    
+    // Display generic COA data for unknown formats
+    function displayGenericCoaData(data) {
+        // Display all fields except objects and the full_text
         for (const [key, value] of Object.entries(data)) {
             // Skip certain fields
             if (key === 'test_results' || key === 'full_text' || key === 'document_type' || 
@@ -478,14 +625,8 @@ document.addEventListener('DOMContentLoaded', function() {
             dataTable.appendChild(row);
         }
         
-        // Display test results for generic documents
-        displayTestResults(data, 'unknown');
-    }
-    
-    // Display test results with document type awareness
-    function displayTestResults(data, docType) {
-        // Only display test results if they exist in the data and we're not dealing with Benzene
-        if (docType !== 'chemipan-benzene' && data.test_results && typeof data.test_results === 'object') {
+        // Display test results if present
+        if (data.test_results && Object.keys(data.test_results).length > 0) {
             const testRow = document.createElement('tr');
             const testCell = document.createElement('td');
             testCell.innerHTML = `<strong>Test Results</strong>`;
@@ -497,6 +638,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <thead>
                     <tr>
                         <th>Test</th>
+                        <th>Specification</th>
                         <th>Result</th>
                     </tr>
                 </thead>
@@ -505,18 +647,22 @@ document.addEventListener('DOMContentLoaded', function() {
             
             const testBody = testTable.querySelector('tbody');
             
-            // Add tests from structured data
+            // Add each test result to the table
             for (const [testName, testData] of Object.entries(data.test_results)) {
-                let result = "";
-                if (typeof testData === 'object' && testData !== null) {
-                    result = testData.result || testData.specification || '';
+                const testDataRow = document.createElement('tr');
+                let spec = '';
+                let result = '';
+                
+                if (typeof testData === 'object') {
+                    spec = testData.specification || '';
+                    result = testData.result || '';
                 } else {
                     result = testData;
                 }
                 
-                const testDataRow = document.createElement('tr');
                 testDataRow.innerHTML = `
                     <td>${testName}</td>
+                    <td>${spec}</td>
                     <td>${result}</td>
                 `;
                 testBody.appendChild(testDataRow);
@@ -528,74 +674,38 @@ document.addEventListener('DOMContentLoaded', function() {
             testRow.appendChild(resultsCell);
             dataTable.appendChild(testRow);
         }
-    }
-    
-    // Extract HCl-specific tests from raw text - only used for HCl documents
-    function extractHClTestsFromRawText(text) {
-        if (!text) return [];
         
-        const tests = [];
-        const testSectionRegex = /Test\s+Specification\s+Result\s*\n(.*?)(?:_{10,}|Larry Coers|Quality Control|Certificate of Analysis|Version Number)/s;
-        const testSectionMatch = text.match(testSectionRegex);
-        
-        if (testSectionMatch && testSectionMatch[1]) {
-            const testSection = testSectionMatch[1];
-            const lines = testSection.split('\n').filter(line => line.trim() !== '');
+        // Display analytical data if present
+        if (data.analytical_data && Object.keys(data.analytical_data).length > 0) {
+            const analyticalRow = document.createElement('tr');
+            const analyticalCell = document.createElement('td');
+            analyticalCell.innerHTML = `<strong>Analytical Data</strong>`;
             
-            let currentTest = null;
-            let currentSpec = null;
+            const analyticalDataCell = document.createElement('td');
+            const analyticalTable = document.createElement('table');
+            analyticalTable.className = 'table table-bordered table-sm';
+            analyticalTable.innerHTML = `
+                <tbody></tbody>
+            `;
             
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                
-                // Skip empty lines or divider lines
-                if (!line || line.match(/^[-_=]{3,}$/)) continue;
-                
-                // Pattern 1: Full line with test, spec, and result (most common case)
-                const fullLineMatch = line.match(/^([^<0-9]+?)(?:\s{2,}|\t)([^_]+?)(?:\s{2,}|\t|_)([^_]*)$/);
-                if (fullLineMatch) {
-                    const testName = fullLineMatch[1].trim();
-                    const result = fullLineMatch[3].trim() || fullLineMatch[2].trim();
-                    tests.push({ name: testName, result: result });
-                    continue;
-                }
-                
-                // Pattern 2: Line with just test name and specification
-                const specLineMatch = line.match(/^([^<0-9]+?)(?:\s{2,}|\t)([<>][^_]+|[\d\.]+\s*-\s*[\d\.]+\s*[%\w]*)$/);
-                if (specLineMatch) {
-                    currentTest = specLineMatch[1].trim();
-                    currentSpec = specLineMatch[2].trim();
-                    
-                    // Check next line for result
-                    if (i < lines.length - 1 && !lines[i+1].match(/^[A-Za-z]/)) {
-                        const resultLine = lines[i+1].trim();
-                        tests.push({ name: currentTest, result: resultLine });
-                        currentTest = null;
-                        currentSpec = null;
-                        i++; // Skip the next line since we've already processed it
-                    } else {
-                        // If no separate result line, use spec as result
-                        tests.push({ name: currentTest, result: currentSpec });
-                        currentTest = null;
-                        currentSpec = null;
-                    }
-                    continue;
-                }
-                
-                // Special cases for HCl document
-                if (line === "Free from Suspended Matter or Sediment" && tests.length > 0) {
-                    // This is a continuation of the previous test (Appearance (Clarity))
-                    const lastTest = tests[tests.length - 1];
-                    lastTest.name += " " + line;
-                    continue;
-                }
-                
-                // Other patterns for HCl-specific tests
-                // ...
+            const analyticalBody = analyticalTable.querySelector('tbody');
+            
+            // Add each analytical data item to the table
+            for (const [key, value] of Object.entries(data.analytical_data)) {
+                const analyticalDataRow = document.createElement('tr');
+                analyticalDataRow.innerHTML = `
+                    <td>${key}</td>
+                    <td>${value}</td>
+                `;
+                analyticalBody.appendChild(analyticalDataRow);
             }
+            
+            // Add the analytical data table to the page
+            analyticalDataCell.appendChild(analyticalTable);
+            analyticalRow.appendChild(analyticalCell);
+            analyticalRow.appendChild(analyticalDataCell);
+            dataTable.appendChild(analyticalRow);
         }
-        
-        return tests;
     }
     
     // ===== DRAG AND DROP FUNCTIONALITY =====

@@ -306,7 +306,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // NEW: Enhanced display results function with document type detection
+    // Enhanced display results function with document type detection
     function enhancedDisplayResults(data) {
         // Clear previous results
         dataTable.innerHTML = '';
@@ -325,9 +325,6 @@ document.addEventListener('DOMContentLoaded', function() {
             // Handle generic COA
             displayGenericMetadata(data);
         }
-        
-        // Display test results based on document type
-        displayTestResults(data, docType);
         
         // Display raw text
         if (data.full_text) {
@@ -348,9 +345,9 @@ document.addEventListener('DOMContentLoaded', function() {
             return 'sigma-aldrich-hcl';
         }
         
-        // Check for CHEMIPAN Benzene
+        // Check for CHEMIPAN Benzene - more specific pattern
         if (text.includes('BENZENE') && 
-            text.includes('CHEMIPAN') && 
+            (text.includes('CHEMIPAN') || text.includes('Polish Academy of Sciences')) && 
             text.includes('Reference Material')) {
             return 'chemipan-benzene';
         }
@@ -360,20 +357,23 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Display Benzene-specific metadata
     function displayBenzeneMetadata(data) {
-        // Ensure supplier is correct for Benzene
-        if (!data.supplier || data.supplier === 'Benzene') {
-            data.supplier = 'Z.D. CHEMIPAN';
-        }
-        
+        // CORRECT FIELDS MAPPING - match actual document fields
         const metadataFields = [
             { key: 'product_name', display: 'Product Name' },
             { key: 'supplier', display: 'Supplier' },
-            { key: 'purity', display: 'Purity' },
-            { key: 'release_date', display: 'Date of Analysis' },
-            { key: 'batch_number', display: 'Lot Number' },
+            { key: 'reference_material_no', display: 'Reference Material No.' },
+            { key: 'purity', display: 'Certified Purity' },
+            { key: 'formula', display: 'Formula' },
+            { key: 'molecular_weight', display: 'Mol. Weight' },
+            { key: 'cas_number', display: 'CAS No.' },
+            { key: 'lot_number', display: 'Lot Number' },
+            { key: 'quantity', display: 'Quantity' },
+            { key: 'storage', display: 'Store at' },
+            { key: 'date_of_analysis', display: 'Date of Analysis' }, // Correct field name
             { key: 'expiry_date', display: 'Expiry Date' }
         ];
         
+        // Display metadata fields
         for (const field of metadataFields) {
             if (data[field.key]) {
                 const row = document.createElement('tr');
@@ -383,6 +383,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
                 dataTable.appendChild(row);
             }
+        }
+        
+        // Display analytical data instead of test results
+        if (data.analytical_data && Object.keys(data.analytical_data).length > 0) {
+            const analyticalRow = document.createElement('tr');
+            const analyticalCell = document.createElement('td');
+            analyticalCell.innerHTML = `<strong>Analytical Data</strong>`;
+            
+            const analyticalDataCell = document.createElement('td');
+            const analyticalTable = document.createElement('table');
+            analyticalTable.className = 'table table-bordered table-sm';
+            analyticalTable.innerHTML = `
+                <tbody></tbody>
+            `;
+            
+            const analyticalBody = analyticalTable.querySelector('tbody');
+            
+            // Add each analytical data item to the table
+            for (const [key, value] of Object.entries(data.analytical_data)) {
+                const analyticalDataRow = document.createElement('tr');
+                analyticalDataRow.innerHTML = `
+                    <td>${key}</td>
+                    <td>${value}</td>
+                `;
+                analyticalBody.appendChild(analyticalDataRow);
+            }
+            
+            // Add the analytical data table to the page
+            analyticalDataCell.appendChild(analyticalTable);
+            analyticalRow.appendChild(analyticalCell);
+            analyticalRow.appendChild(analyticalDataCell);
+            dataTable.appendChild(analyticalRow);
         }
     }
     
@@ -422,13 +454,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 dataTable.appendChild(row);
             }
         }
+        
+        // Display test results for HCl documents
+        displayTestResults(data, 'sigma-aldrich-hcl');
     }
     
     // Display generic metadata
     function displayGenericMetadata(data) {
         for (const [key, value] of Object.entries(data)) {
             // Skip certain fields
-            if (key === 'test_results' || key === 'full_text' || key === 'document_type') continue;
+            if (key === 'test_results' || key === 'full_text' || key === 'document_type' || 
+                key === 'analytical_data' || typeof value === 'object') continue;
             
             const row = document.createElement('tr');
             
@@ -441,154 +477,60 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             dataTable.appendChild(row);
         }
+        
+        // Display test results for generic documents
+        displayTestResults(data, 'unknown');
     }
     
     // Display test results with document type awareness
     function displayTestResults(data, docType) {
-        const testRow = document.createElement('tr');
-        const testCell = document.createElement('td');
-        testCell.innerHTML = `<strong>Test Results</strong>`;
-        
-        const resultsCell = document.createElement('td');
-        const testTable = document.createElement('table');
-        testTable.className = 'table table-bordered table-sm';
-        testTable.innerHTML = `
-            <thead>
-                <tr>
-                    <th>Test</th>
-                    <th>Result</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        `;
-        
-        const testBody = testTable.querySelector('tbody');
-        
-        // Based on document type, use different test extraction methods
-        if (docType === 'sigma-aldrich-hcl') {
-            // For HCl, use both raw text extraction and structured data
-            const extractedTests = extractHClTestsFromRawText(data.full_text);
+        // Only display test results if they exist in the data and we're not dealing with Benzene
+        if (docType !== 'chemipan-benzene' && data.test_results && typeof data.test_results === 'object') {
+            const testRow = document.createElement('tr');
+            const testCell = document.createElement('td');
+            testCell.innerHTML = `<strong>Test Results</strong>`;
             
-            // Add each test to the table
-            for (const test of extractedTests) {
+            const resultsCell = document.createElement('td');
+            const testTable = document.createElement('table');
+            testTable.className = 'table table-bordered table-sm';
+            testTable.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            
+            const testBody = testTable.querySelector('tbody');
+            
+            // Add tests from structured data
+            for (const [testName, testData] of Object.entries(data.test_results)) {
+                let result = "";
+                if (typeof testData === 'object' && testData !== null) {
+                    result = testData.result || testData.specification || '';
+                } else {
+                    result = testData;
+                }
+                
                 const testDataRow = document.createElement('tr');
                 testDataRow.innerHTML = `
-                    <td>${test.name}</td>
-                    <td>${test.result}</td>
+                    <td>${testName}</td>
+                    <td>${result}</td>
                 `;
                 testBody.appendChild(testDataRow);
             }
             
-            // Add any tests from structured data that weren't extracted
-            if (data.test_results && typeof data.test_results === 'object') {
-                const existingTestNames = extractedTests.map(t => t.name);
-                
-                for (const [testName, testData] of Object.entries(data.test_results)) {
-                    // Skip if this test is already in our list
-                    if (existingTestNames.includes(testName)) continue;
-                    
-                    let result = "";
-                    if (typeof testData === 'object' && testData !== null) {
-                        result = testData.result || testData.specification || '';
-                    } else {
-                        result = testData;
-                    }
-                    
-                    const testDataRow = document.createElement('tr');
-                    testDataRow.innerHTML = `
-                        <td>${testName}</td>
-                        <td>${result}</td>
-                    `;
-                    testBody.appendChild(testDataRow);
-                }
-            }
-        } else if (docType === 'chemipan-benzene') {
-            // For Benzene, use benzene-specific tests
-            // These should come from structured data
-            if (data.test_results && typeof data.test_results === 'object') {
-                for (const [testName, testData] of Object.entries(data.test_results)) {
-                    let result = "";
-                    if (typeof testData === 'object' && testData !== null) {
-                        result = testData.result || testData.specification || '';
-                    } else {
-                        result = testData;
-                    }
-                    
-                    const testDataRow = document.createElement('tr');
-                    testDataRow.innerHTML = `
-                        <td>${testName}</td>
-                        <td>${result}</td>
-                    `;
-                    testBody.appendChild(testDataRow);
-                }
-            } else {
-                // Fallback for benzene: key standard tests
-                const benzeneTests = [
-                    { name: "Appearance (Clarity)", result: "Clear" },
-                    { name: "Appearance (Color)", result: "Colorless" },
-                    { name: "Appearance (Form)", result: "Liquid" },
-                    { name: "Purity", result: data.purity || "99.95 ± 0.02 %" },
-                    { name: "Water Content", result: "0.04 ± 0.01 %" },
-                    { name: "Color Test", result: "0 APHA" }
-                ];
-                
-                for (const test of benzeneTests) {
-                    const testDataRow = document.createElement('tr');
-                    testDataRow.innerHTML = `
-                        <td>${test.name}</td>
-                        <td>${test.result}</td>
-                    `;
-                    testBody.appendChild(testDataRow);
-                }
-            }
-        } else {
-            // For generic documents, use the generic approach
-            // Extract directly from raw text
-            const extractedTests = extractGenericTestsFromRawText(data.full_text);
-            
-            // Add each test to the table
-            for (const test of extractedTests) {
-                const testDataRow = document.createElement('tr');
-                testDataRow.innerHTML = `
-                    <td>${test.name}</td>
-                    <td>${test.result}</td>
-                `;
-                testBody.appendChild(testDataRow);
-            }
-            
-            // Add any tests from structured data
-            if (data.test_results && typeof data.test_results === 'object') {
-                const existingTestNames = extractedTests.map(t => t.name);
-                
-                for (const [testName, testData] of Object.entries(data.test_results)) {
-                    // Skip if this test is already in our list
-                    if (existingTestNames.includes(testName)) continue;
-                    
-                    let result = "";
-                    if (typeof testData === 'object' && testData !== null) {
-                        result = testData.result || testData.specification || '';
-                    } else {
-                        result = testData;
-                    }
-                    
-                    const testDataRow = document.createElement('tr');
-                    testDataRow.innerHTML = `
-                        <td>${testName}</td>
-                        <td>${result}</td>
-                    `;
-                    testBody.appendChild(testDataRow);
-                }
-            }
+            // Add the test table to the page
+            resultsCell.appendChild(testTable);
+            testRow.appendChild(testCell);
+            testRow.appendChild(resultsCell);
+            dataTable.appendChild(testRow);
         }
-        
-        // Add the test table to the page
-        resultsCell.appendChild(testTable);
-        testRow.appendChild(testCell);
-        testRow.appendChild(resultsCell);
-        dataTable.appendChild(testRow);
     }
     
-    // Extract HCl-specific tests from raw text
+    // Extract HCl-specific tests from raw text - only used for HCl documents
     function extractHClTestsFromRawText(text) {
         if (!text) return [];
         
@@ -610,7 +552,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!line || line.match(/^[-_=]{3,}$/)) continue;
                 
                 // Pattern 1: Full line with test, spec, and result (most common case)
-                // Example: "Appearance (Color) Colorless Colorless"
                 const fullLineMatch = line.match(/^([^<0-9]+?)(?:\s{2,}|\t)([^_]+?)(?:\s{2,}|\t|_)([^_]*)$/);
                 if (fullLineMatch) {
                     const testName = fullLineMatch[1].trim();
@@ -620,7 +561,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 
                 // Pattern 2: Line with just test name and specification
-                // Examples: "Color Test < 10 APHA"
                 const specLineMatch = line.match(/^([^<0-9]+?)(?:\s{2,}|\t)([<>][^_]+|[\d\.]+\s*-\s*[\d\.]+\s*[%\w]*)$/);
                 if (specLineMatch) {
                     currentTest = specLineMatch[1].trim();
@@ -650,129 +590,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     continue;
                 }
                 
-                if (line === "(by ICP)" && tests.length > 0) {
-                    // This is a continuation of the previous test (Heavy Metals)
-                    const lastTest = tests[tests.length - 1];
-                    lastTest.name += " " + line;
-                    continue;
-                }
-                
-                // Pattern for multi-line entries
-                if (line.match(/^[A-Za-z]/) && !line.includes("<") && !line.includes("-")) {
-                    if (i < lines.length - 1) {
-                        const nextLine = lines[i+1].trim();
-                        if (nextLine.match(/^[<>0-9]/) || nextLine.includes("-")) {
-                            // This is likely a test name followed by spec on next line
-                            currentTest = line;
-                            
-                            // Skip to spec line
-                            i++;
-                            currentSpec = nextLine;
-                            
-                            // Check if there's a result line after
-                            if (i < lines.length - 1 && !lines[i+1].match(/^[A-Za-z]/)) {
-                                const resultLine = lines[i+1].trim();
-                                tests.push({ name: currentTest, result: resultLine });
-                                i++; // Skip the result line
-                            } else {
-                                // Use spec as result if no separate result line
-                                tests.push({ name: currentTest, result: currentSpec });
-                            }
-                            
-                            currentTest = null;
-                            currentSpec = null;
-                            continue;
-                        }
-                    }
-                    
-                    // If we get here, it's likely just a test name without clear spec/result
-                    tests.push({ name: line, result: "" });
-                }
-            }
-        }
-        
-        // Look for more common test patterns specific to HCl
-        const hclTests = [
-            { name: "Appearance (Clarity)", regex: /Appearance\s*\(Clarity\).*?(Clear)/ },
-            { name: "Appearance (Color)", regex: /Appearance\s*\(Color\).*?(Colorless)/ },
-            { name: "Appearance (Form)", regex: /Appearance\s*\(Form\).*?(Liquid)/ },
-            { name: "Color Test", regex: /Color\s*Test.*?([0-9]+\s*APHA)/ },
-            { name: "Titration with NaOH", regex: /Titration.*?NaOH.*?([\d\.]+\s*%)/ },
-            { name: "Residue on Ignition", regex: /Residue\s*on\s*Ignition.*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Arsenic (As)", regex: /Arsenic.*?\(As\).*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Bromide", regex: /Bromide.*?(<\s*[\d\.]+\s*%)/ },
-            { name: "Iron (Fe)", regex: /Iron.*?\(Fe\).*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Free Chlorine", regex: /Free\s*Chlorine.*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Heavy Metals", regex: /Heavy\s*Metals.*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Ammonium", regex: /Ammonium.*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Sulfite", regex: /Sulfite.*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Sulfate", regex: /Sulfate.*?(<\s*[\d\.]+\s*ppm)/ },
-            { name: "Meets ACS Requirements", regex: /Meets\s*ACS\s*Requirements.*?(Conforms)/ }
-        ];
-        
-        // Add any common tests that weren't found
-        for (const commonTest of hclTests) {
-            // Skip if we already have this test
-            if (tests.some(t => t.name.includes(commonTest.name))) continue;
-            
-            const match = text.match(commonTest.regex);
-            if (match) {
-                tests.push({ name: commonTest.name, result: match[1] });
-            }
-        }
-        
-        return tests;
-    }
-    
-    // Extract generic tests from raw text
-    function extractGenericTestsFromRawText(text) {
-        if (!text) return [];
-        
-        const tests = [];
-        
-        // Look for test patterns in the text
-        const lines = text.split('\n');
-        for (const line of lines) {
-            // Skip short lines
-            if (line.length < 5) continue;
-            
-            // Try different patterns for test results
-            const colonPattern = line.match(/([A-Za-z\s\(\)]+):\s*([A-Za-z0-9\s\.%<>]+)/);
-            if (colonPattern) {
-                const testName = colonPattern[1].trim();
-                const result = colonPattern[2].trim();
-                
-                // Filter out non-test fields
-                if (testName && result && 
-                    !testName.toLowerCase().includes('date') && 
-                    !testName.toLowerCase().includes('number') && 
-                    !testName.toLowerCase().includes('name')) {
-                    
-                    // Check if we already have this test
-                    if (!tests.some(t => t.name === testName)) {
-                        tests.push({ name: testName, result: result });
-                    }
-                }
-                continue;
-            }
-            
-            // Try tab or multiple space pattern
-            const spacePattern = line.match(/([A-Za-z\s\(\)]+)\s{2,}([A-Za-z0-9\s\.%<>]+)/);
-            if (spacePattern) {
-                const testName = spacePattern[1].trim();
-                const result = spacePattern[2].trim();
-                
-                // Filter out non-test fields
-                if (testName && result && 
-                    !testName.toLowerCase().includes('date') && 
-                    !testName.toLowerCase().includes('number') && 
-                    !testName.toLowerCase().includes('name')) {
-                    
-                    // Check if we already have this test
-                    if (!tests.some(t => t.name === testName)) {
-                        tests.push({ name: testName, result: result });
-                    }
-                }
+                // Other patterns for HCl-specific tests
+                // ...
             }
         }
         

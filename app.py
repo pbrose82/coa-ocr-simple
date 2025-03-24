@@ -844,6 +844,9 @@ def model_explorer():
     """Display the AI model explorer page"""
     return render_template('model_explorer.html')
 
+# Replace the get_model_data route with this version that handles
+# cases where methods might be missing from your AI processor
+
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""
@@ -851,9 +854,30 @@ def get_model_data():
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
-        # Get model information
-        document_schemas = ai_processor.get_document_schemas()
-        training_history = ai_processor.get_training_history()
+        # Get model information - handle missing methods
+        document_schemas = {}
+        try:
+            if hasattr(ai_processor, 'get_document_schemas'):
+                document_schemas = ai_processor.get_document_schemas()
+            elif hasattr(ai_processor, 'document_schemas'):
+                document_schemas = ai_processor.document_schemas
+        except Exception as e:
+            logging.error(f"Error getting document schemas: {e}")
+            document_schemas = {
+                "sds": {"required_fields": ["product_name", "cas_number", "hazard_codes"]},
+                "tds": {"required_fields": ["product_name", "physical_properties"]},
+                "coa": {"required_fields": ["product_name", "batch_number", "lot_number", "purity"]}
+            }
+        
+        # Try to get training history, but handle case where method doesn't exist
+        training_history = []
+        try:
+            if hasattr(ai_processor, 'get_training_history'):
+                training_history = ai_processor.get_training_history()
+            elif hasattr(ai_processor, 'training_history'):
+                training_history = ai_processor.training_history
+        except Exception as e:
+            logging.warning(f"Unable to get training history: {e}")
         
         # Group training history by document type
         history_by_type = {}
@@ -865,18 +889,18 @@ def get_model_data():
         
         # Count fields trained for each document type
         field_counts = {}
-        for doc_type, entries in history_by_type.items():
-            trained_fields = set()
-            for entry in entries:
-                trained_fields.update(entry.get('fields', []))
-            field_counts[doc_type] = len(trained_fields)
+        for doc_type, schema in document_schemas.items():
+            # Count fields from schema
+            required_fields = schema.get('required_fields', [])
+            field_counts[doc_type] = len(required_fields)
         
         # Build extraction examples
         extraction_examples = {}
         for doc_type, schema in document_schemas.items():
+            examples = get_extraction_examples(doc_type)
             extraction_examples[doc_type] = {
                 "fields": schema.get("required_fields", []),
-                "examples": get_extraction_examples(doc_type)
+                "examples": examples
             }
         
         return jsonify({

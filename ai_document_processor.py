@@ -4,6 +4,7 @@ import os
 import logging
 import pickle
 import json
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -27,7 +28,6 @@ except ImportError:
 class AIDocumentProcessor:
     # ... your existing code ...
     
-    # Add these methods at the end of the class
     def get_training_history(self):
         """Get training history for review"""
         # If training_history exists as an attribute, return it
@@ -46,10 +46,6 @@ class AIDocumentProcessor:
 
     def export_model_config(self, output_file=None):
         """Export the model configuration in readable JSON format for review"""
-        import json
-        import time
-        import logging
-        
         if not output_file:
             output_file = 'model_config.json'
         
@@ -461,50 +457,6 @@ class AIDocumentProcessor:
                 
         return entities
 
-    def get_training_history(self):
-    """Get training history for review"""
-    if hasattr(self, 'training_history'):
-        return self.training_history
-    return []
-
-def get_document_schemas(self):
-    """Get current document schemas for review"""
-    if hasattr(self, 'document_schemas'):
-        return self.document_schemas
-    return {}
-
-def export_model_config(self, output_file=None):
-    """Export the model configuration in readable JSON format for review"""
-    if not output_file:
-        output_file = 'model_config.json'
-    
-    try:
-        if hasattr(self, 'training_history'):
-            training_history = self.training_history
-        else:
-            training_history = []
-            
-        if hasattr(self, 'document_schemas'):
-            document_schemas = self.document_schemas
-        else:
-            document_schemas = {}
-            
-        config = {
-            'document_schemas': document_schemas,
-            'training_history': training_history,
-            'model_info': {
-                'export_date': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-        }
-        
-        with open(output_file, 'w') as f:
-            json.dump(config, f, indent=2)
-            
-        return f"Model configuration exported to {output_file}"
-    except Exception as e:
-        logging.error(f"Error exporting model configuration: {e}")
-        return f"Error exporting model configuration: {e}"
-    
     def _extract_product_name(self, text):
         """Extract product name from document text"""
         # Try several patterns for product name
@@ -663,14 +615,6 @@ def export_model_config(self, output_file=None):
             return {"status": "success", "message": f"Updated extraction rules for {doc_type}", "details": save_result}
         else:
             return {"status": "warning", "message": "No updates were made to the model"}
-    
-    def get_training_history(self):
-        """Get training history for review"""
-        return self.training_history
-    
-    def get_document_schemas(self):
-        """Get current document schemas for review"""
-        return self.document_schemas
     
     def reset_document_schema(self, doc_type):
         """Reset a document schema to default (for troubleshooting)"""

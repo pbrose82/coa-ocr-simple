@@ -219,13 +219,28 @@ class AIDocumentProcessor:
             confidence = coa_count / len(coa_patterns)
             return "coa", min(confidence, 0.95)
             
-        else:
-            # If there's a tie or unclear results
-            return "unknown", 0.3
-    
+            else:
+        # If there's a tie or unclear results
+        return "unknown", 0.3
+
+
+    def __init__(self):
+        """Initialize the document processor with default settings"""
+        self.classifier = None  # Initialize classifier as None
+        self.document_schemas = {}  # Initialize empty schemas
+        self.training_history = []  # Initialize empty training history
+
+        # Attempt to load saved model state if it exists
+        try:
+            self.load_model_state()
+        except:
+            logging.info("No saved model state found, initializing new model")
+
+
     def extract_sections(self, text, doc_type):
         """Extract sections from document based on document type"""
         sections = {}
+
         
         if not text:
             return sections

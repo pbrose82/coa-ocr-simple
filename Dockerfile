@@ -1,6 +1,11 @@
 FROM python:3.9-slim
 
-# Install system dependencies
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV RENDER=true
+
+# Install Tesseract OCR and Poppler (needed for PDF processing)
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
@@ -10,18 +15,18 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Create model directory
+RUN mkdir -p /app/models
+
+# Copy requirements and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Create directories for models
-RUN mkdir -p /app/models
 
 # Copy application files
 COPY . .
 
-# Expose port - environment variable will override this
-EXPOSE 8080
+# Make directories if they don't exist
+RUN mkdir -p static && mkdir -p templates
 
-# Use Render's PORT environment variable
-CMD gunicorn --bind 0.0.0.0:$PORT app:app
+# Run with gunicorn - Render will set the PORT environment variable
+CMD gunicorn --bind 0.0.0.0:$PORT app:app --timeout 120

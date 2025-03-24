@@ -25,129 +25,52 @@ except ImportError:
     logging.warning("Transformers library not available, using pattern matching only")
 
 class AIDocumentProcessor:
-    """AI-enhanced document processor for SDS, TDS, and COA documents
-    Optimized for Render free tier with minimal memory footprint
-    """
+    # ... your existing code ...
     
-    def __init__(self, model_path=None):
-        """Initialize the document processor with lightweight options for free tier"""
-        # Document schemas - will always be available even without AI
-        self.document_schemas = {
-            'sds': {
-                'sections': ['Identification', 'Hazards Identification', 'Composition', 
-                             'First-Aid Measures', 'Fire-Fighting Measures', 'Accidental Release',
-                             'Handling and Storage', 'Exposure Controls', 'Physical Properties',
-                             'Stability and Reactivity', 'Toxicological Information'],
-                'required_fields': ['product_identifier', 'manufacturer', 'emergency_phone']
-            },
-            'tds': {
-                'sections': ['Product Description', 'Features', 'Applications', 
-                             'Technical Data', 'Processing', 'Storage', 'Packaging'],
-                'required_fields': ['product_name', 'manufacturer', 'physical_properties']
-            },
-            'coa': {
-                'sections': ['Product Information', 'Test Results', 'Specifications'],
-                'required_fields': ['product_name', 'batch_number', 'lot_number', 'test_results', 'purity']
-            }
-        }
-        
-        # Training history for model review and improvement
-        self.training_history = []
-        
-        # Try to load saved state if available
-        self.load_model_state(model_path)
-        
-        # Initialize AI components only if available and in lazy loading mode
-        self.classifier = None
-        self.ner_extractor = None
-        self.tfidf = None
-        
-        if AI_IMPORTS_AVAILABLE:
-            self.tfidf = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
-        
-        # Don't initialize transformers models immediately - they'll be loaded on first use
-        # This saves memory until they're actually needed
-    
-    def load_model_state(self, model_path=None):
-        """Load saved model state if available"""
-        # Try multiple potential locations
-        paths_to_try = [
-            model_path,
-            os.environ.get('RENDER_DISK_PATH', '/app/models') + '/model_state.pkl',
-            'models/model_state.pkl'
-        ]
-        
-        for path in paths_to_try:
-            if path and os.path.exists(path):
-                try:
-                    with open(path, 'rb') as f:
-                        state = pickle.load(f)
-                        self.document_schemas = state.get('document_schemas', self.document_schemas)
-                        
-                        # Load training history if available
-                        self.training_history = state.get('training_history', [])
-                        
-                        # Initialize tfidf with saved vocabulary if available
-                        if 'tfidf_vocabulary' in state and state['tfidf_vocabulary'] and AI_IMPORTS_AVAILABLE:
-                            self.tfidf = TfidfVectorizer(vocabulary=state['tfidf_vocabulary'])
-                            
-                    logging.info(f"Loaded model state from {path}")
-                    return True
-                except Exception as e:
-                    logging.warning(f"Failed to load model state from {path}: {e}")
-        
-        return False
-    
-    def save_model_state(self):
-        """Save model state to a persistent location"""
-        # Check if we're on Render
-        if os.environ.get('RENDER'):
-            # Use Render disk path if available
-            disk_path = os.environ.get('RENDER_DISK_PATH', '/app/models')
-            os.makedirs(disk_path, exist_ok=True)
-            
-            # Save model state
-            try:
-                with open(f"{disk_path}/model_state.pkl", 'wb') as f:
-                    pickle.dump({
-                        'document_schemas': self.document_schemas,
-                        'training_history': self.training_history,
-                        'tfidf_vocabulary': self.tfidf.vocabulary_ if hasattr(self.tfidf, 'vocabulary_') else None
-                    }, f)
-                logging.info(f"Model saved to {disk_path}/model_state.pkl")
-                return f"Model saved to {disk_path}/model_state.pkl"
-            except Exception as e:
-                logging.error(f"Error saving model: {e}")
-                return f"Error saving model: {e}"
-        else:
-            # Local development save path
-            os.makedirs('models', exist_ok=True)
-            try:
-                with open('models/model_state.pkl', 'wb') as f:
-                    pickle.dump({
-                        'document_schemas': self.document_schemas,
-                        'training_history': self.training_history,
-                        'tfidf_vocabulary': self.tfidf.vocabulary_ if hasattr(self.tfidf, 'vocabulary_') else None
-                    }, f)
-                logging.info("Model saved locally to models/model_state.pkl")
-                return "Model saved locally to models/model_state.pkl"
-            except Exception as e:
-                logging.error(f"Error saving model locally: {e}")
-                return f"Error saving model locally: {e}"
-    
+    # Add these methods at the end of the class
+    def get_training_history(self):
+        """Get training history for review"""
+        # If training_history exists as an attribute, return it
+        if hasattr(self, 'training_history'):
+            return self.training_history
+        # Otherwise return an empty list
+        return []
+
+    def get_document_schemas(self):
+        """Get current document schemas for review"""
+        # If document_schemas exists as an attribute, return it
+        if hasattr(self, 'document_schemas'):
+            return self.document_schemas
+        # Otherwise return an empty dict
+        return {}
+
     def export_model_config(self, output_file=None):
         """Export the model configuration in readable JSON format for review"""
+        import json
+        import time
+        import logging
+        
         if not output_file:
             output_file = 'model_config.json'
-            
+        
         try:
+            # Create a simplified config if training_history doesn't exist
+            if hasattr(self, 'training_history'):
+                training_history = self.training_history
+            else:
+                training_history = []
+                
+            # Get document schemas
+            if hasattr(self, 'document_schemas'):
+                document_schemas = self.document_schemas
+            else:
+                document_schemas = {}
+                
             config = {
-                'document_schemas': self.document_schemas,
-                'training_history': self.training_history,
+                'document_schemas': document_schemas,
+                'training_history': training_history,
                 'model_info': {
-                    'ai_available': AI_IMPORTS_AVAILABLE,
-                    'transformers_available': TRANSFORMERS_AVAILABLE,
-                    'export_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    'export_date': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
             }
             

@@ -1101,6 +1101,11 @@ def extract():
                     # Process with AI
                     ai_result = ai_processor.process_document(text)
                     logging.info(f"AI processing completed in {time.time() - ai_start:.2f} seconds")
+                    print("==== AI RESULT ====")
+                    print(json.dumps(ai_result, indent=2))
+
+
+                    
                     
                     # Convert AI result to format compatible with existing UI
                     data = adapt_ai_result_to_legacy_format(ai_result)

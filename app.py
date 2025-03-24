@@ -837,6 +837,111 @@ def adapt_ai_result_to_legacy_format(ai_result):
     
     return data
 
+# Add these routes to your app.py file
+
+@app.route('/model-explorer')
+def model_explorer():
+    """Display the AI model explorer page"""
+    return render_template('model_explorer.html')
+
+@app.route('/api/model-data')
+def get_model_data():
+    """API endpoint to get model data for the explorer interface"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    try:
+        # Get model information
+        document_schemas = ai_processor.get_document_schemas()
+        training_history = ai_processor.get_training_history()
+        
+        # Group training history by document type
+        history_by_type = {}
+        for entry in training_history:
+            doc_type = entry.get('doc_type', 'unknown')
+            if doc_type not in history_by_type:
+                history_by_type[doc_type] = []
+            history_by_type[doc_type].append(entry)
+        
+        # Count fields trained for each document type
+        field_counts = {}
+        for doc_type, entries in history_by_type.items():
+            trained_fields = set()
+            for entry in entries:
+                trained_fields.update(entry.get('fields', []))
+            field_counts[doc_type] = len(trained_fields)
+        
+        # Build extraction examples
+        extraction_examples = {}
+        for doc_type, schema in document_schemas.items():
+            extraction_examples[doc_type] = {
+                "fields": schema.get("required_fields", []),
+                "examples": get_extraction_examples(doc_type)
+            }
+        
+        return jsonify({
+            "status": "success",
+            "document_schemas": document_schemas,
+            "training_history": history_by_type,
+            "field_counts": field_counts,
+            "extraction_examples": extraction_examples
+        })
+    except Exception as e:
+        logging.error(f"Error getting model data: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def get_extraction_examples(doc_type):
+    """Get sample extraction patterns for the given document type"""
+    examples = {}
+    
+    if doc_type == "sds":
+        examples = {
+            "product_name": {
+                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
+                "example": "Product Name: Acetone"
+            },
+            "cas_number": {
+                "pattern": r"CAS\s+Number\s*[:.]\s*([0-9\-]+)",
+                "example": "CAS Number: 67-64-1"
+            },
+            "hazard_codes": {
+                "pattern": r"\b(H\d{3}[A-Za-z]?)\b",
+                "example": "Hazard Codes: H225, H319, H336"
+            }
+        }
+    elif doc_type == "tds":
+        examples = {
+            "product_name": {
+                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
+                "example": "Product Name: TechBond Adhesive X-500"
+            },
+            "density": {
+                "pattern": r"(?:Density|Specific\s+Gravity)\s*[:.]\s*([\d.,]+\s*(?:g/cm3|kg/m3|g/mL))",
+                "example": "Density: 1.05 g/cm3"
+            },
+            "storage_conditions": {
+                "pattern": r"Storage(?:\s+conditions?)?\s*[:.]\s*([^\n]+)",
+                "example": "Storage conditions: Store at 5-25°C"
+            }
+        }
+    elif doc_type == "coa":
+        examples = {
+            "batch_number": {
+                "pattern": r"(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)",
+                "example": "Batch Number: ABC123"
+            },
+            "purity": {
+                "pattern": r"(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)",
+                "example": "Purity: 99.8%"
+            },
+            "test_results": {
+                "pattern": "Complex extraction logic",
+                "example": "Test Results: multiple fields extracted as objects"
+            }
+        }
+    
+    return examples
+
 def refresh_alchemy_token():
     """Refresh the Alchemy API token"""
     global alchemy_token_cache

@@ -16,7 +16,6 @@ RUN mkdir -p static/css static/js templates models
 # Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir torch==2.0.1+cpu -f https://download.pytorch.org/whl/torch_stable.html
 
 
 # Copy application files

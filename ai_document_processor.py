@@ -218,10 +218,11 @@ class AIDocumentProcessor:
         elif coa_count > sds_count and coa_count > tds_count:
             confidence = coa_count / len(coa_patterns)
             return "coa", min(confidence, 0.95)
-            
-            else:
-        # If there's a tie or unclear results
-        return "unknown", 0.3
+
+        else:
+            # If there's a tie or unclear results
+            return "unknown", 0.3
+
 
 
     def __init__(self):

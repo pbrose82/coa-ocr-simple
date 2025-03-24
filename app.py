@@ -59,6 +59,11 @@ if ai_available:
 def index():
     return render_template('index.html')
 
+@app.route("/healthz")
+def health():
+    return "ok"
+
+
 @app.route('/training')
 def training():
     return render_template('training.html')

@@ -103,8 +103,8 @@ class AIDocumentProcessor:
     if not self.classifier and TRANSFORMERS_AVAILABLE:
         try:
             self.classifier = pipeline("zero-shot-classification", 
-                                       model="facebook/bart-large-mnli",
-                                       device=-1)  # Force CPU usage
+                           model="typeform/distilbert-base-uncased-mnli",
+                           device=-1)  # Smaller, lightweight model
             logging.info("Zero-shot classifier loaded successfully.")
             return True
         except Exception as e:

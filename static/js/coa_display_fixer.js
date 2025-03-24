@@ -11,47 +11,50 @@
 document.addEventListener('DOMContentLoaded', function() {
     console.log("COA Display Fixer loaded");
 
-    // Enhanced function to format test results for display
-    function formatTestResults(testResults) {
-        // Check if it's a string (JSON) and try to parse it
-        if (typeof testResults === 'string') {
-            try {
-                testResults = JSON.parse(testResults);
-            } catch (e) {
-                console.error('Failed to parse test results:', e);
-                return testResults || "No test results available";
-            }
+   // Replace or update the formatTestResults function in coa_display_fixer.js
+
+function formatTestResults(testResults) {
+    // Check if it's a string (JSON) and try to parse it
+    if (typeof testResults === 'string') {
+        try {
+            testResults = JSON.parse(testResults);
+        } catch (e) {
+            console.error('Failed to parse test results:', e);
+            return testResults || "No test results available";
+        }
+    }
+
+    if (!testResults || typeof testResults !== 'object') {
+        return "No test results available";
+    }
+
+    // Build HTML table for display with improved styling
+    let html = '<table class="table table-sm table-bordered mb-0" style="width:100%; border-collapse: collapse;">';
+    html += '<thead><tr><th style="width:40%; text-align:left; background-color:#f8f9fa; padding:6px;">Test</th>' + 
+            '<th style="width:30%; text-align:left; background-color:#f8f9fa; padding:6px;">Specification</th>' + 
+            '<th style="width:30%; text-align:left; background-color:#f8f9fa; padding:6px;">Result</th></tr></thead><tbody>';
+
+    for (const [testName, testData] of Object.entries(testResults)) {
+        let specification = '';
+        let result = '';
+
+        // Handle different possible formats
+        if (typeof testData === 'object') {
+            specification = testData.specification || testData.specificaton || '';  
+            result = testData.result || '';
+        } else {
+            result = testData;
         }
 
-        if (!testResults || typeof testResults !== 'object') {
-            return "No test results available";
-        }
+        html += `<tr>
+            <td style="padding:6px; border:1px solid #dee2e6; font-weight:500;">${testName}</td>
+            <td style="padding:6px; border:1px solid #dee2e6;">${specification}</td>
+            <td style="padding:6px; border:1px solid #dee2e6;">${result}</td>
+        </tr>`;
+    }
 
-        // Build HTML table for display
-        let html = '<table class="table table-sm table-bordered mb-0" style="width:100%; table-layout:auto;">';
-        html += '<thead><tr><th>Test</th><th>Specification</th><th>Result</th></tr></thead><tbody>';
-
-        for (const [testName, testData] of Object.entries(testResults)) {
-            let specification = '';
-            let result = '';
-
-            // Handle different possible formats
-            if (typeof testData === 'object') {
-                specification = testData.specification || testData.specificaton || '';  
-                result = testData.result || '';
-            } else {
-                result = testData;
-            }
-
-            html += `<tr>
-                <td class="fw-medium" style="white-space: nowrap; max-width: 250px;">${testName}</td>
-                <td style="white-space: nowrap; max-width: 250px;">${specification}</td>
-                <td style="white-space: nowrap; max-width: 250px;">${result}</td>
-            </tr>`;
-        }
-
-        html += '</tbody></table>';
-        return html;
+    html += '</tbody></table>';
+    return html;
     }
 
     // Function to format analytical data for display

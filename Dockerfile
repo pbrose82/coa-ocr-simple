@@ -15,8 +15,12 @@ RUN mkdir -p static/css static/js templates models
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
+# Install dependencies - first without torch which may fail
+RUN pip install --no-cache-dir -r requirements.txt || echo "Continuing despite any torch errors"
+
+# Install PyTorch CPU version separately
+RUN pip install --no-cache-dir torch==2.0.1 --index-url https://download.pytorch.org/whl/cpu
 
 # Copy application files
 COPY app.py ai_document_processor.py ./

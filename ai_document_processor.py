@@ -1,4 +1,5 @@
-# Import required libraries
+# ai_document_processor.py
+
 import re
 import os
 import logging
@@ -8,7 +9,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-# Conditional imports to handle missing dependencies gracefully
+# Optional scientific and transformer imports
 try:
     import numpy as np
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -17,7 +18,6 @@ except ImportError:
     AI_IMPORTS_AVAILABLE = False
     logging.warning("Scientific Python libraries not available, running in limited mode")
 
-# Try to import transformer libraries, but have fallbacks
 TRANSFORMERS_AVAILABLE = False
 try:
     from transformers import pipeline
@@ -26,42 +26,56 @@ except ImportError:
     logging.warning("Transformers library not available, using pattern matching only")
 
 class AIDocumentProcessor:
-    # ... your existing code ...
-    
+    def __init__(self):
+        self.classifier = None
+        self.document_schemas = {}
+        self.training_history = []
+
+        try:
+            self.load_model_state()
+        except:
+            logging.info("No saved model state found, initializing new model")
+
+    def save_model_state(self):
+        try:
+            with open("model_state.pkl", "wb") as f:
+                pickle.dump({
+                    "document_schemas": self.document_schemas,
+                    "training_history": self.training_history
+                }, f)
+            logging.info("Model state saved to model_state.pkl")
+            return "Model state saved"
+        except Exception as e:
+            logging.error(f"Error saving model state: {e}")
+            return f"Error saving model state: {e}"
+
+    def load_model_state(self):
+        try:
+            if os.path.exists("model_state.pkl"):
+                with open("model_state.pkl", "rb") as f:
+                    state = pickle.load(f)
+                    self.document_schemas = state.get("document_schemas", {})
+                    self.training_history = state.get("training_history", [])
+                logging.info("Model state loaded from model_state.pkl")
+            else:
+                logging.info("No saved model state found at startup")
+        except Exception as e:
+            logging.error(f"Error loading model state: {e}")
+
     def get_training_history(self):
-        """Get training history for review"""
-        # If training_history exists as an attribute, return it
-        if hasattr(self, 'training_history'):
-            return self.training_history
-        # Otherwise return an empty list
-        return []
+        return getattr(self, 'training_history', [])
 
     def get_document_schemas(self):
-        """Get current document schemas for review"""
-        # If document_schemas exists as an attribute, return it
-        if hasattr(self, 'document_schemas'):
-            return self.document_schemas
-        # Otherwise return an empty dict
-        return {}
+        return getattr(self, 'document_schemas', {})
 
     def export_model_config(self, output_file=None):
-        """Export the model configuration in readable JSON format for review"""
         if not output_file:
             output_file = 'model_config.json'
-        
+
         try:
-            # Create a simplified config if training_history doesn't exist
-            if hasattr(self, 'training_history'):
-                training_history = self.training_history
-            else:
-                training_history = []
-                
-            # Get document schemas
-            if hasattr(self, 'document_schemas'):
-                document_schemas = self.document_schemas
-            else:
-                document_schemas = {}
-                
+            training_history = getattr(self, 'training_history', [])
+            document_schemas = getattr(self, 'document_schemas', {})
+
             config = {
                 'document_schemas': document_schemas,
                 'training_history': training_history,
@@ -69,44 +83,39 @@ class AIDocumentProcessor:
                     'export_date': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
             }
-            
+
             with open(output_file, 'w') as f:
                 json.dump(config, f, indent=2)
-                
+
             return f"Model configuration exported to {output_file}"
         except Exception as e:
             logging.error(f"Error exporting model configuration: {e}")
             return f"Error exporting model configuration: {e}"
-    
+
     def import_model_config(self, input_file):
-        """Import model configuration from a JSON file"""
         try:
             with open(input_file, 'r') as f:
                 config = json.load(f)
-                
+
             if 'document_schemas' in config:
                 self.document_schemas = config['document_schemas']
-                
+
             if 'training_history' in config:
                 self.training_history = config['training_history']
-                
-            # Save the updated state
+
             self.save_model_state()
-            
             return f"Model configuration imported from {input_file}"
         except Exception as e:
             logging.error(f"Error importing model configuration: {e}")
             return f"Error importing model configuration: {e}"
-    
+
     def lazy_load_classifier(self):
-        """Lazy load the classifier only when needed"""
         if not self.classifier and TRANSFORMERS_AVAILABLE:
             try:
-                # Use smaller model to avoid memory issues
                 self.classifier = pipeline(
-                    "zero-shot-classification", 
+                    "zero-shot-classification",
                     model="typeform/distilbert-base-uncased-mnli",
-                    device=-1  # Force CPU usage
+                    device=-1
                 )
                 return True
             except Exception as e:
@@ -114,34 +123,20 @@ class AIDocumentProcessor:
                 return False
         return self.classifier is not None
 
-
-
-    
     def classify_document(self, text):
-        """Classify document type using patterns or zero-shot classification if available"""
-        # First try pattern-based classification (always works, even without AI)
         doc_type, confidence = self.pattern_based_classification(text)
-        
-        # If confident with patterns, return that result
+
         if confidence > 0.8:
             return doc_type, confidence
-            
-        # Otherwise, try AI classification if available
+
         if self.lazy_load_classifier() and text:
             try:
-                # Limit text to first 2000 chars to save processing time
                 sample_text = text[:2000]
-                
-                # Define possible classes
-                candidate_labels = ["Safety Data Sheet", "Technical Data Sheet", 
-                                   "Certificate of Analysis", "Unknown Document"]
-                
-                # Use zero-shot classification
+                candidate_labels = ["Safety Data Sheet", "Technical Data Sheet", "Certificate of Analysis", "Unknown Document"]
                 result = self.classifier(sample_text, candidate_labels)
                 best_match = result['labels'][0]
                 best_confidence = result['scores'][0]
-                
-                # Map to internal document type
+
                 if "Safety Data Sheet" in best_match:
                     return "sds", best_confidence
                 elif "Technical Data Sheet" in best_match:
@@ -150,83 +145,48 @@ class AIDocumentProcessor:
                     return "coa", best_confidence
                 else:
                     return "unknown", best_confidence
-                    
+
             except Exception as e:
                 logging.error(f"AI classification failed: {e}")
-                # Fall back to pattern-based classification
                 return doc_type, confidence
-        
-        # Return pattern-based results if AI not available
+
         return doc_type, confidence
-    
+
     def pattern_based_classification(self, text):
-        """Classify document based on text patterns - faster than AI approach"""
         if not text:
             return "unknown", 0.0
-            
-        text_lower = text.lower()
-        
-        # SDS patterns
-        sds_patterns = [
-            r'safety\s+data\s+sheet',
-            r'material\s+safety\s+data\s+sheet',
-            r'msds',
-            r'sds\s+number',
-            r'section\s+[1-9][0-6]?[\s:]+\w+',  # SDS has 16 numbered sections
-            r'hazard(s)?\s+identification'
-        ]
-        
-        # TDS patterns
-        tds_patterns = [
-            r'technical\s+data\s+sheet',
-            r'product\s+specification',
-            r'technical\s+specification',
-            r'physical\s+properties',
-            r'application\s+guide',
-            r'technical\s+bulletin'
-        ]
-        
-        # COA patterns - enhanced to catch more varieties
-        coa_patterns = [
-            r'certificate\s+of\s+analysis',
-            r'c\.?o\.?a\.?',
-            r'analytical\s+result',
-            r'test\s+result',
-            r'batch\s+analysis',
-            r'quality\s+release',
-            r'purity\s+analysis',
-            r'lot\s+number',
-            r'batch\s+number',
-            r'certified\s+purity'
-        ]
-        
-        # Count matches for each document type
-        sds_count = sum(1 for pattern in sds_patterns if re.search(pattern, text_lower))
-        tds_count = sum(1 for pattern in tds_patterns if re.search(pattern, text_lower))
-        coa_count = sum(1 for pattern in coa_patterns if re.search(pattern, text_lower))
-        
-        # Calculate confidence based on match count
-        total_matches = sds_count + tds_count + coa_count
-        
-        if total_matches == 0:
-            return "unknown", 0.1
-        
-        # Determine document type
-        if sds_count > tds_count and sds_count > coa_count:
-            confidence = sds_count / len(sds_patterns)
-            return "sds", min(confidence, 0.95)  # Cap at 0.95
-            
-        elif tds_count > sds_count and tds_count > coa_count:
-            confidence = tds_count / len(tds_patterns)
-            return "tds", min(confidence, 0.95)
-            
-        elif coa_count > sds_count and coa_count > tds_count:
-            confidence = coa_count / len(coa_patterns)
-            return "coa", min(confidence, 0.95)
 
-        else:
-            # If there's a tie or unclear results
-            return "unknown", 0.3
+        text_lower = text.lower()
+        sds_patterns = [
+            r'safety\s+data\s+sheet', r'material\s+safety\s+data\s+sheet', r'msds', r'sds\s+number',
+            r'section\s+[1-9][0-6]?[\s:]+\w+', r'hazard(s)?\s+identification'
+        ]
+        tds_patterns = [
+            r'technical\s+data\s+sheet', r'product\s+specification', r'technical\s+specification',
+            r'physical\s+properties', r'application\s+guide', r'technical\s+bulletin'
+        ]
+        coa_patterns = [
+            r'certificate\s+of\s+analysis', r'c\.?o\.?a\.?', r'analytical\s+result',
+            r'test\s+result', r'batch\s+analysis', r'quality\s+release',
+            r'purity\s+analysis', r'lot\s+number', r'batch\s+number', r'certified\s+purity'
+        ]
+
+        sds_count = sum(1 for p in sds_patterns if re.search(p, text_lower))
+        tds_count = sum(1 for p in tds_patterns if re.search(p, text_lower))
+        coa_count = sum(1 for p in coa_patterns if re.search(p, text_lower))
+
+        total = sds_count + tds_count + coa_count
+        if total == 0:
+            return "unknown", 0.1
+
+        if sds_count > tds_count and sds_count > coa_count:
+            return "sds", min(sds_count / len(sds_patterns), 0.95)
+        elif tds_count > sds_count and tds_count > coa_count:
+            return "tds", min(tds_count / len(tds_patterns), 0.95)
+        elif coa_count > sds_count and coa_count > tds_count:
+            return "coa", min(coa_count / len(coa_patterns), 0.95)
+
+        return "unknown", 0.3
 
 
 

@@ -117,7 +117,7 @@
                 <h5>Extracted Data</h5>
                 
                 <!-- AG Grid container -->
-                <div id="extractedDataGrid" class="ag-theme-alpine" style="height: 400px; width: 100%;"></div>
+                <div id="extractedDataGrid" class="ag-theme-alpine" style="height: auto; min-height: 400px; width: 100%;"></div>
                 
                 <div class="mt-4">
                     <h5>Raw Text</h5>
@@ -313,56 +313,113 @@
         // Global variable to store the grid
         let extractedDataGrid;
         
-        // Initialize AG Grid for results
-        function initializeGrid() {
-            const gridDiv = document.getElementById('extractedDataGrid');
-            
-            // Create column defs for key-value pairs
-            const columnDefs = [
-                {
-                    headerName: 'Field',
-                    field: 'field',
-                    cellClass: 'field-label',
-                    minWidth: 200,
-                    flex: 1,
-                    filter: true,
-                    floatingFilter: true,
-                    sortable: true
-                },
-                {
-                    headerName: 'Value',
-                    field: 'value',
-                    cellClass: 'field-value',
-                    minWidth: 300,
-                    flex: 2,
-                    cellRenderer: 'objectValueRenderer',
-                    autoHeight: true,
-                    wrapText: true
-                }
-            ];
-            
-            // Set up grid options
-            const gridOptions = {
-                columnDefs: columnDefs,
-                rowData: [],
-                defaultColDef: {
-                    resizable: true
-                },
-                domLayout: 'autoHeight',
-                suppressMovableColumns: true,
-                animateRows: true,
-                components: {
-                    objectValueRenderer: ObjectValueRenderer
-                },
-                // Use fixed height
-                headerHeight: 40,
-                rowHeight: 48
-            };
-            
-            // Create grid
-            extractedDataGrid = new agGrid.Grid(gridDiv, gridOptions);
-            return gridOptions;
+        // Add this to the index.html file, replacing the existing grid initialization code
+
+// Modify the grid container element to have responsive height
+// Find <div id="extractedDataGrid" class="ag-theme-alpine" style="height: 400px; width: 100%;"></div>
+// And replace with:
+// <div id="extractedDataGrid" class="ag-theme-alpine" style="height: auto; min-height: 400px; width: 100%;"></div>
+
+// Then update the initializeGrid function:
+function initializeGrid() {
+    const gridDiv = document.getElementById('extractedDataGrid');
+    
+    // Create column defs for key-value pairs
+    const columnDefs = [
+        {
+            headerName: 'Field',
+            field: 'field',
+            cellClass: 'field-label',
+            minWidth: 150,
+            maxWidth: 250,
+            filter: true,
+            floatingFilter: true,
+            sortable: true
+        },
+        {
+            headerName: 'Value',
+            field: 'value',
+            cellClass: 'field-value',
+            minWidth: 300,
+            flex: 3,
+            cellRenderer: 'htmlCellRenderer',
+            autoHeight: true,
+            wrapText: true
         }
+    ];
+    
+    // Set up grid options
+    const gridOptions = {
+        columnDefs: columnDefs,
+        rowData: [],
+        defaultColDef: {
+            resizable: true
+        },
+        domLayout: 'autoHeight',
+        suppressMovableColumns: true,
+        animateRows: true,
+        components: {
+            htmlCellRenderer: HtmlCellRenderer
+        },
+        // Adjust row height for content
+        headerHeight: 40,
+        getRowHeight: function(params) {
+            // Check if we have HTML content that needs more space
+            if (params.data && params.data.value && 
+                typeof params.data.value === 'string' && 
+                params.data.value.includes('<table')) {
+                return 300; // Give test results more space
+            }
+            return 48; // Default row height
+        },
+        onGridReady: function(params) {
+            // Auto-size all columns when grid is ready
+            params.api.sizeColumnsToFit();
+            
+            // Handle window resize
+            window.addEventListener('resize', function() {
+                setTimeout(function() {
+                    params.api.sizeColumnsToFit();
+                });
+            });
+        }
+    };
+    
+    // Create grid
+    extractedDataGrid = new agGrid.Grid(gridDiv, gridOptions);
+    return gridOptions;
+}
+
+// Improve the HtmlCellRenderer implementation
+class HtmlCellRenderer {
+    init(params) {
+        this.eGui = document.createElement('div');
+        this.eGui.style.width = '100%';
+        this.eGui.style.height = '100%';
+        this.eGui.style.overflow = 'auto';
+        
+        if (params.value === null || params.value === undefined) {
+            this.eGui.innerHTML = '';
+            return;
+        }
+
+        if (typeof params.value === 'string' && params.value.trim().startsWith('<table')) {
+            this.eGui.innerHTML = params.value;
+            
+            // Ensure tables take full width
+            const tables = this.eGui.querySelectorAll('table');
+            tables.forEach(table => {
+                table.style.width = '100%';
+            });
+        } else {
+            this.eGui.textContent = params.value;
+        }
+    }
+
+    getGui() {
+        return this.eGui;
+    }
+}
         
         // Update grid with extracted data
         function updateGridWithData(data) {

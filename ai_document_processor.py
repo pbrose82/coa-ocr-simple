@@ -3,7 +3,9 @@ import re
 import os
 import logging
 import pickle
+import json
 from collections import defaultdict
+from datetime import datetime
 
 # Conditional imports to handle missing dependencies gracefully
 try:
@@ -45,9 +47,12 @@ class AIDocumentProcessor:
             },
             'coa': {
                 'sections': ['Product Information', 'Test Results', 'Specifications'],
-                'required_fields': ['product_name', 'batch_number', 'test_results']
+                'required_fields': ['product_name', 'batch_number', 'lot_number', 'test_results', 'purity']
             }
         }
+        
+        # Training history for model review and improvement
+        self.training_history = []
         
         # Try to load saved state if available
         self.load_model_state(model_path)
@@ -79,6 +84,9 @@ class AIDocumentProcessor:
                         state = pickle.load(f)
                         self.document_schemas = state.get('document_schemas', self.document_schemas)
                         
+                        # Load training history if available
+                        self.training_history = state.get('training_history', [])
+                        
                         # Initialize tfidf with saved vocabulary if available
                         if 'tfidf_vocabulary' in state and state['tfidf_vocabulary'] and AI_IMPORTS_AVAILABLE:
                             self.tfidf = TfidfVectorizer(vocabulary=state['tfidf_vocabulary'])
@@ -103,6 +111,7 @@ class AIDocumentProcessor:
                 with open(f"{disk_path}/model_state.pkl", 'wb') as f:
                     pickle.dump({
                         'document_schemas': self.document_schemas,
+                        'training_history': self.training_history,
                         'tfidf_vocabulary': self.tfidf.vocabulary_ if hasattr(self.tfidf, 'vocabulary_') else None
                     }, f)
                 logging.info(f"Model saved to {disk_path}/model_state.pkl")
@@ -117,6 +126,7 @@ class AIDocumentProcessor:
                 with open('models/model_state.pkl', 'wb') as f:
                     pickle.dump({
                         'document_schemas': self.document_schemas,
+                        'training_history': self.training_history,
                         'tfidf_vocabulary': self.tfidf.vocabulary_ if hasattr(self.tfidf, 'vocabulary_') else None
                     }, f)
                 logging.info("Model saved locally to models/model_state.pkl")
@@ -124,6 +134,50 @@ class AIDocumentProcessor:
             except Exception as e:
                 logging.error(f"Error saving model locally: {e}")
                 return f"Error saving model locally: {e}"
+    
+    def export_model_config(self, output_file=None):
+        """Export the model configuration in readable JSON format for review"""
+        if not output_file:
+            output_file = 'model_config.json'
+            
+        try:
+            config = {
+                'document_schemas': self.document_schemas,
+                'training_history': self.training_history,
+                'model_info': {
+                    'ai_available': AI_IMPORTS_AVAILABLE,
+                    'transformers_available': TRANSFORMERS_AVAILABLE,
+                    'export_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+            }
+            
+            with open(output_file, 'w') as f:
+                json.dump(config, f, indent=2)
+                
+            return f"Model configuration exported to {output_file}"
+        except Exception as e:
+            logging.error(f"Error exporting model configuration: {e}")
+            return f"Error exporting model configuration: {e}"
+    
+    def import_model_config(self, input_file):
+        """Import model configuration from a JSON file"""
+        try:
+            with open(input_file, 'r') as f:
+                config = json.load(f)
+                
+            if 'document_schemas' in config:
+                self.document_schemas = config['document_schemas']
+                
+            if 'training_history' in config:
+                self.training_history = config['training_history']
+                
+            # Save the updated state
+            self.save_model_state()
+            
+            return f"Model configuration imported from {input_file}"
+        except Exception as e:
+            logging.error(f"Error importing model configuration: {e}")
+            return f"Error importing model configuration: {e}"
     
     def lazy_load_classifier(self):
         """Lazy load the classifier only when needed"""
@@ -208,7 +262,7 @@ class AIDocumentProcessor:
             r'technical\s+bulletin'
         ]
         
-        # COA patterns
+        # COA patterns - enhanced to catch more varieties
         coa_patterns = [
             r'certificate\s+of\s+analysis',
             r'c\.?o\.?a\.?',
@@ -216,7 +270,10 @@ class AIDocumentProcessor:
             r'test\s+result',
             r'batch\s+analysis',
             r'quality\s+release',
-            r'purity\s+analysis'
+            r'purity\s+analysis',
+            r'lot\s+number',
+            r'batch\s+number',
+            r'certified\s+purity'
         ]
         
         # Count matches for each document type
@@ -303,23 +360,64 @@ class AIDocumentProcessor:
                 }
                 
         elif doc_type == "coa":
-            # COA often has test results in a table
-            results_section = re.search(r'(?i)((?:Test|Analytical)\s+(?:Results|Data)[\s\S]*?)'
-                                      r'(?:Conclusion|Release|Approval|Authorized|$)', text)
-            if results_section:
-                sections['test_results'] = {
-                    "title": "Test Results",
-                    "content": results_section.group(1)
-                }
+            # Improved COA section extraction
+            
+            # Extract test results section (multiple patterns to match different formats)
+            results_patterns = [
+                r'(?i)((?:Test|Analytical)\s+(?:Results|Data)[\s\S]*?)'
+                r'(?:Conclusion|Release|Approval|Authorized|$)',
+                
+                r'(?i)(TEST\s+RESULTS[\s\S]*?)'
+                r'(?:This lot|Analysis|Conclusion|$)',
+                
+                r'(?i)((?:Parameter|Test|Property)[\s\n]+(?:Specification|Spec|Limit)[\s\n]+(?:Result|Value)[\s\S]*?)'
+                r'(?:This lot|Analysis|Conclusion|$)'
+            ]
+            
+            for pattern in results_patterns:
+                results_section = re.search(pattern, text)
+                if results_section:
+                    sections['test_results'] = {
+                        "title": "Test Results",
+                        "content": results_section.group(1)
+                    }
+                    break
                 
             # Extract specifications section
-            specs_section = re.search(r'(?i)((?:Specifications?|Requirements|Limits)[\s\S]*?)'
-                                    r'(?:Test|Analytical|Conclusion|$)', text)
-            if specs_section:
-                sections['specifications'] = {
-                    "title": "Specifications",
-                    "content": specs_section.group(1)
-                }
+            specs_patterns = [
+                r'(?i)((?:Specifications?|Requirements|Limits)[\s\S]*?)'
+                r'(?:Test|Analytical|Conclusion|$)',
+                
+                r'(?i)((?:Specifications?[\s\n]+)(?:[\s\S]*?))'
+                r'(?:Test|Analytical|Conclusion|$)'
+            ]
+            
+            for pattern in specs_patterns:
+                specs_section = re.search(pattern, text)
+                if specs_section:
+                    sections['specifications'] = {
+                        "title": "Specifications",
+                        "content": specs_section.group(1)
+                    }
+                    break
+                    
+            # Extract product information section
+            product_info_patterns = [
+                r'(?i)(Product(?:\s+Name|:)[\s\S]*?)'
+                r'(?:TEST|Analytical|Specifications|$)',
+                
+                r'(?:^|[\n\r]+)((?:Product|Catalog|Lot|Batch|CAS)[\s\S]*?)'
+                r'(?:TEST|Analytical|Specifications|$)'
+            ]
+            
+            for pattern in product_info_patterns:
+                product_section = re.search(pattern, text)
+                if product_section:
+                    sections['product_information'] = {
+                        "title": "Product Information",
+                        "content": product_section.group(1)
+                    }
+                    break
                 
         return sections
     
@@ -377,20 +475,66 @@ class AIDocumentProcessor:
                 entities['storage_conditions'] = storage.group(1).strip()
                 
         elif doc_type == "coa":
-            # Extract batch/lot number
-            batch = re.search(r'(?i)(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)', text)
-            if batch:
-                entities['batch_number'] = batch.group(1).strip()
+            # Enhanced COA extraction
+            
+            # Extract batch/lot number (support multiple formats)
+            batch_patterns = [
+                r'(?i)(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)',
+                r'(?i)(?:Batch|Lot)[:.]\s*([A-Za-z0-9\-]+)',
+                r'(?i)(?:Batch|Lot)\s*(?:Number|No|#)?\s*[:.]\s*([A-Za-z0-9\-]+)'
+            ]
+            
+            for pattern in batch_patterns:
+                batch_match = re.search(pattern, text)
+                if batch_match:
+                    batch_value = batch_match.group(1).strip()
+                    entities['batch_number'] = batch_value
+                    entities['lot_number'] = batch_value  # Store in both fields for compatibility
+                    break
+                    
+            # Extract CAS number
+            cas_patterns = [
+                r'(?i)CAS\s+(?:Number|No|#)\s*[:.]\s*([0-9\-]+)',
+                r'(?i)CAS[:.]\s*([0-9\-]+)',
+                r'\b(\d{2,7}-\d{2}-\d)\b'  # General CAS pattern
+            ]
+            
+            for pattern in cas_patterns:
+                cas_match = re.search(pattern, text)
+                if cas_match:
+                    entities['cas_number'] = cas_match.group(1).strip()
+                    break
                 
-            # Extract test results if in a structured format
-            purity_match = re.search(r'(?i)(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)', text)
-            if purity_match:
-                entities['purity'] = purity_match.group(1).strip()
+            # Extract purity
+            purity_patterns = [
+                r'(?i)(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)',
+                r'(?i)Certified\s+purity\s*[:.]\s*([\d.]+\s*[±\+\-]\s*[\d.]+\s*%)',
+                r'(?i)(?:Purity|Assay)(?:\s+Result)?\s*[:.]\s*([\d.]+)',
+                r'(?i)(?:Purity|Assay)[\s\S]{1,50}([\d.]+\s*%)'
+            ]
+            
+            for pattern in purity_patterns:
+                purity_match = re.search(pattern, text)
+                if purity_match:
+                    entities['purity'] = purity_match.group(1).strip()
+                    break
                 
             # Extract manufacturing/test date
-            date_match = re.search(r'(?i)(?:Date\s+of\s+(?:Analysis|Test|Manufacture)|Release\s+Date)\s*[:.]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\w+\s+\d{1,2},?\s+\d{4})', text)
-            if date_match:
-                entities['analysis_date'] = date_match.group(1).strip()
+            date_patterns = [
+                r'(?i)(?:Date\s+of\s+(?:Analysis|Test|Manufacture)|Release\s+Date|Analysis\s+Date)\s*[:.]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})',
+                r'(?i)(?:Date\s+of\s+(?:Analysis|Test|Manufacture)|Release\s+Date|Analysis\s+Date)\s*[:.]\s*(\w+\s+\d{1,2},?\s+\d{4})'
+            ]
+            
+            for pattern in date_patterns:
+                date_match = re.search(pattern, text)
+                if date_match:
+                    entities['analysis_date'] = date_match.group(1).strip()
+                    break
+            
+            # Extract test results
+            test_results = self._extract_test_results(text)
+            if test_results:
+                entities['test_results'] = test_results
                 
         return entities
     
@@ -398,10 +542,11 @@ class AIDocumentProcessor:
         """Extract product name from document text"""
         # Try several patterns for product name
         patterns = [
-            r'(?i)Product\s+name\s*[:.]\s*([^\n]+)',
+            r'(?i)Product\s+Name\s*[:.]\s*([^\n]+)',
             r'(?i)Product\s+identifier\s*[:.]\s*([^\n]+)',
             r'(?i)Trade\s+name\s*[:.]\s*([^\n]+)',
-            r'(?i)Material\s+name\s*[:.]\s*([^\n]+)'
+            r'(?i)Material\s+name\s*[:.]\s*([^\n]+)',
+            r'(?i)Product:\s*([^\n]+)'
         ]
         
         for pattern in patterns:
@@ -411,12 +556,107 @@ class AIDocumentProcessor:
         
         return None
     
+    def _extract_test_results(self, text):
+        """Extract test results from COA documents"""
+        test_results = {}
+        
+        # Look for common test result formats
+        
+        # Format 1: Parameter/Specification/Result table pattern
+        table_pattern = r'(?i)(?:Parameter|Test|Property|Description)\s+(?:Specification|Spec|Limit)\s+(?:Result|Value|Reading)'
+        table_match = re.search(table_pattern, text)
+        
+        if table_match:
+            # Find the start of the table
+            table_start = table_match.start()
+            
+            # Find the end of the table (look for empty lines or certain phrases)
+            end_markers = [
+                r'\n\s*\n',
+                r'(?:This lot|Analysis|Conclusion)',
+                r'(?:for laboratory use|store at)'
+            ]
+            
+            table_end = len(text)
+            for marker in end_markers:
+                end_match = re.search(marker, text[table_start:], re.IGNORECASE)
+                if end_match:
+                    potential_end = table_start + end_match.start()
+                    if potential_end < table_end:
+                        table_end = potential_end
+            
+            # Extract table content
+            table_content = text[table_start:table_end]
+            
+            # Parse lines to extract test results
+            lines = table_content.split('\n')
+            current_parameter = None
+            
+            for i, line in enumerate(lines):
+                if i == 0:  # Skip header row
+                    continue
+                    
+                # Skip empty lines
+                if not line.strip():
+                    continue
+                
+                # Try to parse as "Parameter Specification Result"
+                parts = re.split(r'\s{2,}|\t', line.strip())
+                
+                # Clean parts and remove any empty strings
+                parts = [p.strip() for p in parts if p.strip()]
+                
+                if len(parts) >= 2:
+                    # Found a test result
+                    test_name = parts[0]
+                    
+                    # Handle different formats
+                    if len(parts) >= 3:
+                        specification = parts[1]
+                        result = parts[2]
+                    else:
+                        specification = ""
+                        result = parts[1]
+                    
+                    test_results[test_name] = {
+                        "specification": specification,
+                        "result": result
+                    }
+        
+        # Format 2: Key-value pairs for test results
+        if not test_results:
+            # Look for patterns like "Test Name: Result" or "Test Name: Spec - Result"
+            test_pattern = r'(?i)([A-Za-z0-9\s\-]+):\s*((?:[\d\.<>]+\s*(?:ppm|%|mg|g)){0,1}(?:[A-Za-z]+\s*)?(?:-\s*)?)((?:[\d\.<>]+\s*(?:ppm|%|mg|g))(?:\s*[A-Za-z]+)?|PASS|FAIL|Conforms)'
+            
+            for match in re.finditer(test_pattern, text):
+                test_name = match.group(1).strip()
+                specification = match.group(2).strip()
+                result = match.group(3).strip()
+                
+                if result and (not specification or specification == "-" or specification == result):
+                    specification = ""
+                
+                test_results[test_name] = {
+                    "specification": specification,
+                    "result": result
+                }
+        
+        return test_results
+    
     def train_from_example(self, text, doc_type, annotations):
         """Allow the system to learn from new examples - lightweight version"""
         if not text or not doc_type:
             return {"status": "error", "message": "Missing text or document type"}
             
         updated = False
+        
+        # Log training attempt
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "annotation_count": len(annotations.get('field_mappings', {})),
+            "fields": list(annotations.get('field_mappings', {}).keys())
+        }
         
         # Add custom extraction patterns for fields
         if 'extraction_patterns' in annotations:
@@ -438,12 +678,86 @@ class AIDocumentProcessor:
                             self.document_schemas[doc_type]['required_fields'].append(field)
                             updated = True
         
+        # Add new document type if it doesn't exist
+        if doc_type not in self.document_schemas:
+            self.document_schemas[doc_type] = {
+                'sections': [],
+                'required_fields': list(annotations.get('field_mappings', {}).keys())
+            }
+            updated = True
+            training_record["new_doc_type"] = True
+        
+        # Add to training history
+        self.training_history.append(training_record)
+        
         # Save model state if updates were made
         if updated:
             save_result = self.save_model_state()
             return {"status": "success", "message": f"Updated extraction rules for {doc_type}", "details": save_result}
         else:
             return {"status": "warning", "message": "No updates were made to the model"}
+    
+    def get_training_history(self):
+        """Get training history for review"""
+        return self.training_history
+    
+    def get_document_schemas(self):
+        """Get current document schemas for review"""
+        return self.document_schemas
+    
+    def reset_document_schema(self, doc_type):
+        """Reset a document schema to default (for troubleshooting)"""
+        if doc_type == "sds":
+            self.document_schemas["sds"] = {
+                'sections': ['Identification', 'Hazards Identification', 'Composition', 
+                            'First-Aid Measures', 'Fire-Fighting Measures', 'Accidental Release',
+                            'Handling and Storage', 'Exposure Controls', 'Physical Properties',
+                            'Stability and Reactivity', 'Toxicological Information'],
+                'required_fields': ['product_identifier', 'manufacturer', 'emergency_phone']
+            }
+        elif doc_type == "tds":
+            self.document_schemas["tds"] = {
+                'sections': ['Product Description', 'Features', 'Applications', 
+                            'Technical Data', 'Processing', 'Storage', 'Packaging'],
+                'required_fields': ['product_name', 'manufacturer', 'physical_properties']
+            }
+        elif doc_type == "coa":
+            self.document_schemas["coa"] = {
+                'sections': ['Product Information', 'Test Results', 'Specifications'],
+                'required_fields': ['product_name', 'batch_number', 'lot_number', 'test_results', 'purity']
+            }
+        else:
+            return {"status": "error", "message": f"Unknown document type: {doc_type}"}
+            
+        # Save the updated schema
+        self.save_model_state()
+        return {"status": "success", "message": f"Reset schema for {doc_type} to default"}
+    
+    def add_extraction_rule(self, doc_type, field, pattern):
+        """Add a custom extraction rule"""
+        if doc_type not in self.document_schemas:
+            return {"status": "error", "message": f"Unknown document type: {doc_type}"}
+            
+        # Add field to required fields if not present
+        if field not in self.document_schemas[doc_type]['required_fields']:
+            self.document_schemas[doc_type]['required_fields'].append(field)
+            
+        # In a more advanced implementation, we would store patterns here
+        # For this simplified version, we just record the change
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "action": "add_rule",
+            "field": field,
+            "pattern": pattern
+        }
+        
+        self.training_history.append(training_record)
+        
+        # Save model state
+        self.save_model_state()
+        
+        return {"status": "success", "message": f"Added extraction rule for {field} in {doc_type}"}
     
     def process_document(self, text):
         """Process document text and extract structured information"""
@@ -470,7 +784,8 @@ class AIDocumentProcessor:
             "document_type": doc_type,
             "confidence": confidence,
             "entities": entities,
-            "sections": sections
+            "sections": sections,
+            "full_text": text
         }
         
         return result

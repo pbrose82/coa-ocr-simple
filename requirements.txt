@@ -8,7 +8,7 @@ pdf2image==1.16.3
 PyPDF2==3.0.1
 
 # 🧠 AI & ML Dependencies
-numpy<2          # This is the one causing issues now due to PyTorch build
+numpy<2
 scikit-learn>=1.0.2
 transformers==4.28.1
-torch==1.13.1+cpu
+torch==1.13.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu

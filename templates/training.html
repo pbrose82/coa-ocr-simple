@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Document Trainer</title>
+    <title>AI Training - Alchemy OCR Intelligence</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ocr-styles.css') }}">
     <style>
         .highlight-section {
-            background-color: rgba(255, 255, 0, 0.2);
+            background-color: rgba(63, 136, 246, 0.1);
             cursor: pointer;
         }
         
         .document-display {
-            border: 1px solid #ddd;
+            border: 1px solid #dee2e6;
             padding: 15px;
             height: 500px;
             overflow-y: scroll;
@@ -22,11 +23,14 @@
             position: relative;
             font-size: 14px;
             line-height: 1.5;
+            background-color: #f8f9fa;
+            border-radius: 4px;
         }
         
         .selected-text {
-            background-color: #d1ecf1;
+            background-color: var(--alchemy-blue-bg);
             padding: 2px 0;
+            border-radius: 2px;
         }
         
         .training-controls {
@@ -41,113 +45,173 @@
         .field-list {
             max-height: 250px;
             overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
         }
         
         .field-item {
-            padding: 8px;
-            border-bottom: 1px solid #eee;
+            padding: 10px;
+            border-bottom: 1px solid #dee2e6;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
+        
+        .field-item:last-child {
+            border-bottom: none;
+        }
+        
+        .field-content {
+            max-width: 70%;
+        }
+        
+        .field-name {
+            font-weight: 500;
+            color: var(--alchemy-dark);
+        }
+        
+        .field-value {
+            color: var(--alchemy-grey);
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .remove-field {
+            color: var(--alchemy-red);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .remove-field:hover {
+            background-color: rgba(228, 0, 43, 0.1);
+        }
     </style>
 </head>
 <body>
+    <!-- Header -->
     <div class="header">
-        <h1>Document AI Trainer</h1>
+        <div class="header-container">
+            <i class="fas fa-brain header-logo"></i>
+            <h1 class="header-title">AI Training Interface</h1>
+        </div>
     </div>
     
-    <div class="main-content">
-        <div class="mb-4">
-            <a href="/" class="btn btn-outline-primary">← Back to OCR App</a>
-        </div>
-        
-        <div class="alert alert-info">
-            <strong>About This Tool:</strong> This interface allows you to teach the AI system how to recognize and extract data from new document types like SDS and TDS. Upload a sample document, highlight important fields, and save the training data.
-        </div>
-        
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Upload Training Document</h5>
+    <!-- App Info Banner -->
+    <div class="tenant-banner">
+        <div class="tenant-container">
+            <div class="tenant-info">
+                Train the AI to recognize and extract data from new document types
             </div>
-            <div class="card-body">
-                <form id="trainForm">
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="documentType" class="form-label">Document Type</label>
-                            <select class="form-select" id="documentType" name="doc_type">
-                                <option value="sds">Safety Data Sheet (SDS)</option>
-                                <option value="tds">Technical Data Sheet (TDS)</option>
-                                <option value="coa">Certificate of Analysis (COA)</option>
-                                <option value="custom">Custom Document Type</option>
-                            </select>
+        </div>
+        <a href="/" class="back-button">
+            <i class="fas fa-arrow-left"></i> BACK TO OCR
+        </a>
+    </div>
+    
+    <!-- Main Content -->
+    <div class="main-content" style="max-width: 1200px; display: block;">
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>About This Tool:</strong> This interface allows you to teach the AI system how to recognize and extract data from different document types like SDS and TDS. Upload a sample document, highlight important fields, and save the training data.
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card" style="background-color: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px;">
+                    <h5 style="color: var(--alchemy-dark); font-weight: 600; margin-bottom: 15px;">Upload Training Document</h5>
+                    <form id="trainForm">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="documentType" class="form-label">Document Type</label>
+                                <select class="form-select" id="documentType" name="doc_type">
+                                    <option value="sds">Safety Data Sheet (SDS)</option>
+                                    <option value="tds">Technical Data Sheet (TDS)</option>
+                                    <option value="coa">Certificate of Analysis (COA)</option>
+                                    <option value="custom">Custom Document Type</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6" id="customTypeInput" style="display: none;">
+                                <label for="customTypeName" class="form-label">Custom Type Name</label>
+                                <input type="text" class="form-control" id="customTypeName" placeholder="Enter custom type name">
+                            </div>
                         </div>
-                        <div class="col-md-6" id="customTypeInput" style="display: none;">
-                            <label for="customTypeName" class="form-label">Custom Type Name</label>
-                            <input type="text" class="form-control" id="customTypeName" placeholder="Enter custom type name">
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Upload Document</label>
+                            <div class="file-upload" id="trainingDropZone">
+                                <div class="file-upload-icon">
+                                    <i class="fas fa-file-alt"></i>
+                                </div>
+                                <p class="file-upload-text">Drag & drop your document here</p>
+                                <p class="file-upload-hint">or</p>
+                                <label for="trainingFileInput" class="custom-file-upload">Choose File</label>
+                                <input type="file" id="trainingFileInput" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff" hidden>
+                                <div id="trainingFileName" class="file-info" style="display: none;">
+                                    <i class="fas fa-file-alt"></i>
+                                    <span id="trainingFileNameText"></span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="trainingFileInput" class="form-label">Upload Document</label>
-                        <input type="file" class="form-control" id="trainingFileInput" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
-                        <div class="form-text">Upload a sample document to train the system. PDF or image files are accepted.</div>
-                    </div>
-                    
-                    <button type="button" id="processBtn" class="btn btn-primary">Process Document</button>
-                </form>
+                        
+                        <button type="button" id="processBtn" class="btn btn-primary">Process Document</button>
+                    </form>
+                </div>
             </div>
         </div>
         
         <div id="trainingInterface" style="display: none;">
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Document Content</h5>
-                </div>
-                <div class="card-body">
-                    <div class="alert alert-primary">
-                        <strong>Instructions:</strong> Select text in the document that contains important information, then map it to a field type on the right.
-                    </div>
-                    <div class="document-display" id="documentContent"></div>
-                </div>
-            </div>
-            
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Field Mapping</h5>
-                </div>
-                <div class="card-body">
-                    <div id="selectionInfo" class="alert alert-secondary">
-                        <div><strong>Selected Text:</strong></div>
-                        <div id="selectedText" class="p-2 bg-light text-break">No text selected</div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="fieldName" class="form-label">Field Name</label>
-                            <input type="text" class="form-control" id="fieldName" placeholder="e.g., product_name, cas_number">
+            <div class="row">
+                <div class="col-md-7">
+                    <div class="card" style="background-color: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px;">
+                        <h5 style="color: var(--alchemy-dark); font-weight: 600; margin-bottom: 15px;">Document Content</h5>
+                        <div class="alert alert-primary">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Instructions:</strong> Select text in the document that contains important information, then map it to a field type on the right.
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="fieldType" class="form-label">Field Type</label>
-                            <select class="form-select" id="fieldType">
-                                <option value="text">Text</option>
-                                <option value="number">Number</option>
-                                <option value="date">Date</option>
-                                <option value="section_title">Section Title</option>
-                            </select>
+                        <div class="document-display" id="documentContent"></div>
+                    </div>
+                </div>
+                <div class="col-md-5">
+                    <div class="card" style="background-color: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px;">
+                        <h5 style="color: var(--alchemy-dark); font-weight: 600; margin-bottom: 15px;">Field Mapping</h5>
+                        <div id="selectionInfo" class="alert alert-secondary">
+                            <div><strong>Selected Text:</strong></div>
+                            <div id="selectedText" class="p-2 bg-light text-break">No text selected</div>
                         </div>
-                    </div>
-                    
-                    <button id="addFieldBtn" class="btn btn-success mb-3" disabled>Add Field</button>
-                    
-                    <h6>Mapped Fields</h6>
-                    <div id="mappedFields" class="field-list border rounded p-2">
-                        <div class="text-muted p-3 text-center">No fields mapped yet</div>
-                    </div>
-                    
-                    <div class="mt-4">
-                        <button id="saveTrainingBtn" class="btn btn-primary" disabled>Save Training Data</button>
-                        <button id="cancelTrainingBtn" class="btn btn-outline-secondary">Cancel</button>
+                        
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label for="fieldName" class="form-label">Field Name</label>
+                                <input type="text" class="form-control" id="fieldName" placeholder="e.g., product_name, cas_number">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="fieldType" class="form-label">Field Type</label>
+                                <select class="form-select" id="fieldType">
+                                    <option value="text">Text</option>
+                                    <option value="number">Number</option>
+                                    <option value="date">Date</option>
+                                    <option value="section_title">Section Title</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <button id="addFieldBtn" class="btn btn-success mb-3" disabled>Add Field</button>
+                        
+                        <h6 style="color: var(--alchemy-dark); font-weight: 500; margin-bottom: 10px;">Mapped Fields</h6>
+                        <div id="mappedFields" class="field-list">
+                            <div class="text-muted p-3 text-center">No fields mapped yet</div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <button id="saveTrainingBtn" class="btn btn-primary" disabled>Save Training Data</button>
+                            <button id="cancelTrainingBtn" class="btn btn-outline-secondary">Cancel</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -161,11 +225,330 @@
         </div>
     </div>
     
+    <!-- Footer -->
     <div class="footer">
-        <img src="{{ url_for('static', filename='Alchemy-logo.svg') }}" alt="Alchemy Cloud Logo" class="footer-logo">
-        <div class="copyright">© DOCUMENT AI TRAINER</div>
+        <div class="footer-content">
+            <img src="{{ url_for('static', filename='Alchemy-logo.svg') }}" alt="Alchemy Cloud Logo" class="footer-logo">
+            <div class="copyright">© ALCHEMY CLOUD, INC. ALL RIGHTS RESERVED.</div>
+        </div>
     </div>
     
-    <script src="{{ url_for('static', filename='js/training.js') }}"></script>
+    <!-- JavaScript for training interface handling -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM elements
+            const documentTypeSelect = document.getElementById('documentType');
+            const customTypeInput = document.getElementById('customTypeInput');
+            const customTypeName = document.getElementById('customTypeName');
+            const trainingFileInput = document.getElementById('trainingFileInput');
+            const trainingFileName = document.getElementById('trainingFileName');
+            const trainingFileNameText = document.getElementById('trainingFileNameText');
+            const trainingDropZone = document.getElementById('trainingDropZone');
+            const processBtn = document.getElementById('processBtn');
+            const trainingInterface = document.getElementById('trainingInterface');
+            const documentContent = document.getElementById('documentContent');
+            const selectedText = document.getElementById('selectedText');
+            const fieldName = document.getElementById('fieldName');
+            const fieldType = document.getElementById('fieldType');
+            const addFieldBtn = document.getElementById('addFieldBtn');
+            const mappedFields = document.getElementById('mappedFields');
+            const saveTrainingBtn = document.getElementById('saveTrainingBtn');
+            const cancelTrainingBtn = document.getElementById('cancelTrainingBtn');
+            const processingStatus = document.getElementById('processingStatus');
+            
+            // Mapped fields data
+            let mappedFieldsData = [];
+            
+            // Handle document type selection
+            documentTypeSelect.addEventListener('change', function() {
+                if (this.value === 'custom') {
+                    customTypeInput.style.display = 'block';
+                } else {
+                    customTypeInput.style.display = 'none';
+                }
+            });
+            
+            // File upload handling
+            trainingFileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    trainingFileNameText.textContent = this.files[0].name;
+                    trainingFileName.style.display = 'flex';
+                    trainingDropZone.classList.add('file-selected');
+                }
+            });
+            
+            // Drag and drop handling
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                trainingDropZone.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                trainingDropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                trainingDropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                trainingDropZone.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                trainingDropZone.classList.remove('highlight');
+            }
+            
+            trainingDropZone.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                if (files.length > 0) {
+                    trainingFileInput.files = files;
+                    trainingFileNameText.textContent = files[0].name;
+                    trainingFileName.style.display = 'flex';
+                    trainingDropZone.classList.add('file-selected');
+                }
+            });
+            
+            // Process Button click handler
+            processBtn.addEventListener('click', function() {
+                if (!trainingFileInput.files || trainingFileInput.files.length === 0) {
+                    alert('Please select a file to process');
+                    return;
+                }
+                
+                // Show processing status
+                processingStatus.style.display = 'flex';
+                
+                // Simulate file processing
+                setTimeout(() => {
+                    processingStatus.style.display = 'none';
+                    trainingInterface.style.display = 'block';
+                    
+                    // Add sample text based on document type
+                    const docType = documentTypeSelect.value;
+                    
+                    if (docType === 'sds') {
+                        documentContent.textContent = getSampleSDS();
+                    } else if (docType === 'tds') {
+                        documentContent.textContent = getSampleTDS();
+                    } else {
+                        documentContent.textContent = getSampleGeneric();
+                    }
+                    
+                    // Setup text selection
+                    setupTextSelection();
+                    
+                    // Scroll to interface
+                    trainingInterface.scrollIntoView({ behavior: 'smooth' });
+                }, 1500);
+            });
+            
+            // Text selection handler
+            function setupTextSelection() {
+                documentContent.addEventListener('mouseup', function() {
+                    const selection = window.getSelection();
+                    const selectedTextContent = selection.toString().trim();
+                    
+                    if (selectedTextContent) {
+                        selectedText.textContent = selectedTextContent;
+                        addFieldBtn.disabled = false;
+                    } else {
+                        selectedText.textContent = 'No text selected';
+                        addFieldBtn.disabled = true;
+                    }
+                });
+            }
+            
+            // Add field button handler
+            addFieldBtn.addEventListener('click', function() {
+                const fieldNameValue = fieldName.value.trim();
+                const fieldTypeValue = fieldType.value;
+                const selectedTextValue = selectedText.textContent;
+                
+                if (!fieldNameValue) {
+                    alert('Please enter a field name');
+                    return;
+                }
+                
+                if (selectedTextValue === 'No text selected') {
+                    alert('Please select text from the document');
+                    return;
+                }
+                
+                // Add to mapped fields data
+                mappedFieldsData.push({
+                    name: fieldNameValue,
+                    type: fieldTypeValue,
+                    value: selectedTextValue
+                });
+                
+                // Update UI
+                updateMappedFieldsUI();
+                
+                // Clear inputs
+                fieldName.value = '';
+                selectedText.textContent = 'No text selected';
+                addFieldBtn.disabled = true;
+                
+                // Enable save button
+                saveTrainingBtn.disabled = false;
+            });
+            
+            // Update mapped fields UI
+            function updateMappedFieldsUI() {
+                if (mappedFieldsData.length === 0) {
+                    mappedFields.innerHTML = '<div class="text-muted p-3 text-center">No fields mapped yet</div>';
+                    return;
+                }
+                
+                mappedFields.innerHTML = '';
+                
+                mappedFieldsData.forEach((field, index) => {
+                    const fieldItem = document.createElement('div');
+                    fieldItem.className = 'field-item';
+                    fieldItem.innerHTML = `
+                        <div class="field-content">
+                            <div class="field-name">${field.name} <span class="badge bg-secondary">${field.type}</span></div>
+                            <div class="field-value" title="${field.value}">${field.value}</div>
+                        </div>
+                        <button class="remove-field" data-index="${index}">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    mappedFields.appendChild(fieldItem);
+                });
+                
+                // Add remove handlers
+                document.querySelectorAll('.remove-field').forEach(button => {
+                    button.addEventListener('click', function() {
+                        const index = parseInt(this.dataset.index);
+                        mappedFieldsData.splice(index, 1);
+                        updateMappedFieldsUI();
+                        
+                        // Disable save button if no fields
+                        if (mappedFieldsData.length === 0) {
+                            saveTrainingBtn.disabled = true;
+                        }
+                    });
+                });
+            }
+            
+            // Save training button handler
+            saveTrainingBtn.addEventListener('click', function() {
+                processingStatus.style.display = 'flex';
+                
+                // Simulate saving training data
+                setTimeout(() => {
+                    processingStatus.style.display = 'none';
+                    alert('Training data saved successfully! The system will now use these patterns for future extractions.');
+                    resetTrainingInterface();
+                }, 1500);
+            });
+            
+            // Cancel button handler
+            cancelTrainingBtn.addEventListener('click', function() {
+                if (mappedFieldsData.length > 0) {
+                    if (!confirm('Are you sure you want to cancel? All mapping progress will be lost.')) {
+                        return;
+                    }
+                }
+                
+                resetTrainingInterface();
+            });
+            
+            // Reset training interface
+            function resetTrainingInterface() {
+                trainingInterface.style.display = 'none';
+                documentContent.textContent = '';
+                selectedText.textContent = 'No text selected';
+                fieldName.value = '';
+                mappedFieldsData = [];
+                updateMappedFieldsUI();
+                saveTrainingBtn.disabled = true;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            
+            // Sample document text
+            function getSampleSDS() {
+                return `SAFETY DATA SHEET
+SECTION 1: Identification
+Product Name: Sample Chemical Solution
+CAS Number: 123-45-6789
+Manufacturer: Example Chemicals Inc.
+Emergency Phone: 1-800-123-4567
+
+SECTION 2: Hazard(s) Identification
+GHS Classification: Flammable Liquid Category 2
+Signal Word: Danger
+Hazard Statements: H225 - Highly flammable liquid and vapor
+                   H319 - Causes serious eye irritation
+                   H336 - May cause drowsiness or dizziness
+
+SECTION 3: Composition/Information on Ingredients
+Chemical Name: Example Chemical
+CAS Number: 123-45-6789
+Concentration: 99.5%
+                    
+SECTION 4: First-Aid Measures
+Eye Contact: Rinse cautiously with water for several minutes. Remove contact lenses, if present and easy to do.
+Skin Contact: Wash with plenty of soap and water.
+Inhalation: Remove person to fresh air and keep comfortable for breathing.`;
+            }
+            
+            function getSampleTDS() {
+                return `TECHNICAL DATA SHEET
+        
+Product Name: TechBond Adhesive X-500
+Product Code: TB-X500
+Manufacturer: TechBond Solutions Ltd.
+
+PRODUCT DESCRIPTION
+TechBond X-500 is a high-performance, two-component epoxy adhesive designed for bonding metals, ceramics, and most plastics. It provides excellent resistance to chemicals, heat, and impact.
+
+TECHNICAL PROPERTIES
+Base: Epoxy Resin
+Color: Clear Amber
+Mix Ratio: 1:1 by volume
+Working Time: 20 minutes at 25°C
+Fixture Time: 2 hours
+Full Cure: 24 hours at 25°C
+Viscosity: 12,000 cP
+Hardness (Shore D): 80
+Temperature Resistance: -40°C to 120°C
+Tensile Strength: 35 MPa`;
+            }
+            
+            function getSampleGeneric() {
+                return `CERTIFICATE OF ANALYSIS
+
+Product Name: Analytical Standard Solution
+Catalog Number: AS-1234
+Lot Number: L5678901
+CAS Number: 78-93-3
+Expiration Date: 2024-12-31
+
+TEST RESULTS
+Appearance          Clear, colorless liquid      PASS
+Purity (GC)         99.8%                        PASS
+Density at 20°C     0.805 g/mL                   PASS
+Refractive Index    1.3785                       PASS
+Water Content       0.02%                        PASS
+
+This lot meets or exceeds all quality specifications. This product is suitable for analytical use.
+
+Analysis Date: 2023-06-15
+Analyst: J. Smith
+Quality Control Approval: M. Johnson
+
+For laboratory use only. Store at 2-8°C.`;
+            }
+        });
+    </script>
 </body>
 </html>

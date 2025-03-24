@@ -67,6 +67,68 @@ def training():
 def serve_static(filename):
     return send_from_directory(app.static_folder, filename)
 
+# Model Management Routes
+@app.route('/model-info')
+def model_info():
+    """View information about the AI model for debugging"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    try:
+        # Get model information
+        document_schemas = ai_processor.get_document_schemas()
+        training_history = ai_processor.get_training_history()
+        
+        # Export the model configuration
+        export_result = ai_processor.export_model_config('model_config.json')
+        
+        return jsonify({
+            "status": "success", 
+            "document_schemas": document_schemas,
+            "training_history": training_history,
+            "export_result": export_result
+        })
+    except Exception as e:
+        logging.error(f"Error getting model info: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/reset-schema', methods=['POST'])
+def reset_schema():
+    """Reset a document schema to default"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    doc_type = request.json.get('doc_type')
+    if not doc_type:
+        return jsonify({"status": "error", "message": "Missing document type"}), 400
+    
+    try:
+        result = ai_processor.reset_document_schema(doc_type)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error resetting schema: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/add-rule', methods=['POST'])
+def add_rule():
+    """Add a custom extraction rule"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    doc_type = request.json.get('doc_type')
+    field = request.json.get('field')
+    pattern = request.json.get('pattern')
+    
+    if not all([doc_type, field, pattern]):
+        return jsonify({"status": "error", "message": "Missing required parameters"}), 400
+    
+    try:
+        result = ai_processor.add_extraction_rule(doc_type, field, pattern)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error adding rule: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 # Utility Functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -757,13 +819,21 @@ def adapt_ai_result_to_legacy_format(ai_result):
                 data[prop] = entities[prop]
     
     elif doc_type == "coa":
-        # For COA, many fields are directly mapped from entities
+        # For COA, make sure all extracted entities are properly mapped
         # Ensure certain key fields are always present in the expected format
         if "batch_number" in entities and "lot_number" not in data:
             data["lot_number"] = entities["batch_number"]
         
         if "analysis_date" in entities and "release_date" not in data:
             data["release_date"] = entities["analysis_date"]
+        
+        # Properly handle test_results - make sure it stays as an object
+        if "test_results" in entities:
+            data["test_results"] = entities["test_results"]
+            
+        # Handle analytical_data if present
+        if "analytical_data" in entities:
+            data["analytical_data"] = entities["analytical_data"]
     
     return data
 
@@ -906,6 +976,14 @@ def extract():
                     # Convert AI result to format compatible with existing UI
                     data = adapt_ai_result_to_legacy_format(ai_result)
                     data['full_text'] = text
+                    
+                    # For debugging, log the structure of the data
+                    logging.info(f"AI result structure: {json.dumps({k: type(v).__name__ for k, v in data.items()})}")
+                    
+                    # Check if we have test_results data for COA
+                    if data.get('document_type') == 'coa' and 'test_results' in data:
+                        logging.info(f"COA test_results found: {json.dumps({k: type(v).__name__ for k, v in data['test_results'].items()})}")
+                    
                 except Exception as e:
                     logging.error(f"AI processing failed, falling back to legacy parser: {e}")
                     # Fall back to legacy processing

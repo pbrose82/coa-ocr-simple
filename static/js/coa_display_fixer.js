@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Build HTML table for display
-        let html = '<table class="table table-sm table-bordered mb-0">';
+        let html = '<table class="table table-sm table-bordered mb-0" style="width:100%; table-layout:auto;">';
         html += '<thead><tr><th>Test</th><th>Specification</th><th>Result</th></tr></thead><tbody>';
 
         for (const [testName, testData] of Object.entries(testResults)) {
@@ -44,9 +44,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             html += `<tr>
-                <td class="fw-medium">${testName}</td>
-                <td>${specification}</td>
-                <td>${result}</td>
+                <td class="fw-medium" style="white-space: nowrap; max-width: 250px;">${testName}</td>
+                <td style="white-space: nowrap; max-width: 250px;">${specification}</td>
+                <td style="white-space: nowrap; max-width: 250px;">${result}</td>
             </tr>`;
         }
 

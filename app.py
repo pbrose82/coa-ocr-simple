@@ -827,9 +827,31 @@ def adapt_ai_result_to_legacy_format(ai_result):
         if "analysis_date" in entities and "release_date" not in data:
             data["release_date"] = entities["analysis_date"]
         
-        # Properly handle test_results - make sure it stays as an object
-        if "test_results" in entities:
-            data["test_results"] = entities["test_results"]
+        # For COA documents, ensure test_results is properly formatted
+if doc_type == "coa" and 'test_results' in entities:
+    # Ensure test_results is a proper dictionary
+    if isinstance(entities['test_results'], str):
+        try:
+            entities['test_results'] = json.loads(entities['test_results'])
+        except:
+            pass  # Keep as string if parsing fails
+    
+    # Clean up any problematic test result entries
+    if isinstance(entities['test_results'], dict):
+        # Fix any malformed entries
+        cleaned_results = {}
+        for test_name, test_data in entities['test_results'].items():
+            if isinstance(test_data, dict):
+                # Ensure the dict has the right keys
+                if 'result' not in test_data and 'specification' not in test_data:
+                    test_data = {'specification': '', 'result': str(test_data)}
+            else:
+                # Convert simple values to the expected format
+                test_data = {'specification': '', 'result': str(test_data)}
+            
+            cleaned_results[test_name] = test_data
+        
+        entities['test_results'] = cleaned_results
             
         # Handle analytical_data if present
         if "analytical_data" in entities:

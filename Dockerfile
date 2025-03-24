@@ -35,4 +35,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 5000
 
 # Launch the app using Gunicorn (production-ready WSGI server)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]
+CMD gunicorn --workers=1 --bind 0.0.0.0:${PORT:-5000} --timeout 120 app:app

@@ -13,6 +13,14 @@ import time
 from pdf2image import convert_from_path
 import PyPDF2
 
+# Import AI Document Processor with error handling
+try:
+    from ai_document_processor import AIDocumentProcessor
+    ai_available = True
+except ImportError:
+    ai_available = False
+    logging.warning("AI document processor not available, falling back to legacy parser")
+
 # Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -37,10 +45,23 @@ alchemy_token_cache = {
     "expires_at": 0  # Unix timestamp when the token expires
 }
 
+# Initialize AI processor
+ai_processor = None
+if ai_available:
+    try:
+        ai_processor = AIDocumentProcessor()
+        logging.info("AI Document Processor initialized successfully")
+    except Exception as e:
+        logging.error(f"Error initializing AI Document Processor: {e}")
+
 # Route Handlers
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/training')
+def training():
+    return render_template('training.html')
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
@@ -70,7 +91,7 @@ def extract_text_from_pdf_without_ocr(pdf_path):
         text = ""
         with open(pdf_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
-            for page_num in range(min(2, len(reader.pages))):
+            for page_num in range(min(5, len(reader.pages))):  # Only process first 5 pages on free tier
                 page_text = reader.pages[page_num].extract_text() or ""
                 if page_text:
                     text += f"--- Page {page_num+1} ---\n{page_text}\n\n"
@@ -681,6 +702,71 @@ def parse_coa_data(text):
     
     return data
 
+def adapt_ai_result_to_legacy_format(ai_result):
+    """Convert AI processor result to format expected by the existing UI"""
+    data = {
+        "document_type": ai_result.get("document_type", "unknown"),
+        "full_text": ai_result.get("full_text", "")
+    }
+    
+    # Map entities to flat structure expected by frontend
+    entities = ai_result.get("entities", {})
+    for key, value in entities.items():
+        if isinstance(value, list) and key != "chemicals" and key != "hazard_codes":
+            # Handle list values - join with commas
+            data[key] = ", ".join(value)
+        else:
+            data[key] = value
+    
+    # Handle document type specific fields
+    doc_type = ai_result.get("document_type")
+    
+    if doc_type == "sds":
+        # Map SDS specific fields
+        if "hazard_codes" in entities:
+            data["hazards"] = ", ".join(entities["hazard_codes"])
+        
+        if "sections" in ai_result:
+            # Extract identification section for basic info
+            section_keys = [k for k in ai_result["sections"].keys() if k.startswith("section_")]
+            for section_key in section_keys:
+                section = ai_result["sections"][section_key]
+                section_content = section.get("content", "")
+                
+                # Add section title to data
+                section_title = section.get("title", "").strip()
+                if section_title:
+                    data[f"section_{section_key[-1]}_title"] = section_title
+                
+                # For section 1, extract key identification info
+                if section_key == "section_1" and "manufacturer" not in data and section_content:
+                    # Try to extract manufacturer
+                    manufacturer_match = re.search(r"(?:Manufacturer|Supplier|Company)(?:\s+name)?\s*[:.]\s*([^\n]+)", 
+                                                 section_content, re.IGNORECASE)
+                    if manufacturer_match:
+                        data["manufacturer"] = manufacturer_match.group(1).strip()
+    
+    elif doc_type == "tds":
+        # Map TDS specific fields
+        if "technical_properties" in ai_result.get("sections", {}):
+            data["technical_data"] = "Available in technical properties section"
+        
+        # Map physical properties from entities
+        for prop in ["density", "viscosity", "flash_point"]:
+            if prop in entities:
+                data[prop] = entities[prop]
+    
+    elif doc_type == "coa":
+        # For COA, many fields are directly mapped from entities
+        # Ensure certain key fields are always present in the expected format
+        if "batch_number" in entities and "lot_number" not in data:
+            data["lot_number"] = entities["batch_number"]
+        
+        if "analysis_date" in entities and "release_date" not in data:
+            data["release_date"] = entities["analysis_date"]
+    
+    return data
+
 def refresh_alchemy_token():
     """Refresh the Alchemy API token"""
     global alchemy_token_cache
@@ -775,9 +861,9 @@ def extract():
                     # Convert PDF to images with highly optimized settings
                     images = convert_from_path(
                         filepath,
-                        dpi=100,  # Very low DPI for speed
+                        dpi=100,  # Very low DPI for speed on free tier
                         first_page=1,
-                        last_page=1,  # Only process first page
+                        last_page=2,  # Only process first 2 pages for free tier
                         thread_count=1,  # Single thread to reduce memory
                         grayscale=True  # Grayscale for faster processing
                     )
@@ -785,7 +871,12 @@ def extract():
                     
                     # OCR the first page only
                     if images:
-                        text = pytesseract.image_to_string(images[0])
+                        text = ""
+                        for i, img in enumerate(images):
+                            if i >= 2:  # Limit to first 2 pages on free tier
+                                break
+                            page_text = pytesseract.image_to_string(img)
+                            text += f"--- Page {i+1} ---\n{page_text}\n\n"
                         logging.info(f"OCR completed in {time.time() - start_time:.2f} seconds")
                     else:
                         return jsonify({"error": "Failed to extract pages from PDF"}), 500
@@ -802,14 +893,31 @@ def extract():
             except Exception as e:
                 logging.warning(f"Failed to remove temp file: {e}")
             
-            # Parse data with enhanced parser
-            parsing_start = time.time()
-            logging.info("Parsing extracted text with enhanced parser")
-            data = parse_coa_data(text)
-            logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
-            
-            # Add the full text
-            data['full_text'] = text
+            # Use AI-based processing if available
+            if ai_processor is not None:
+                logging.info("Using AI Document Processor for enhanced extraction")
+                ai_start = time.time()
+                
+                try:
+                    # Process with AI
+                    ai_result = ai_processor.process_document(text)
+                    logging.info(f"AI processing completed in {time.time() - ai_start:.2f} seconds")
+                    
+                    # Convert AI result to format compatible with existing UI
+                    data = adapt_ai_result_to_legacy_format(ai_result)
+                    data['full_text'] = text
+                except Exception as e:
+                    logging.error(f"AI processing failed, falling back to legacy parser: {e}")
+                    # Fall back to legacy processing
+                    data = parse_coa_data(text)
+                    data['full_text'] = text
+            else:
+                # Use legacy processing
+                logging.info("Using legacy parser (AI not available)")
+                parsing_start = time.time()
+                data = parse_coa_data(text)
+                logging.info(f"Legacy parsing completed in {time.time() - parsing_start:.2f} seconds")
+                data['full_text'] = text
             
             # Remove any record fields from the data to ensure they don't display
             if '_record_id' in data:
@@ -842,6 +950,73 @@ def extract():
             return jsonify({"error": str(e)}), 500
     
     return jsonify({"error": "File type not allowed"}), 400
+
+# Route for Training the AI
+@app.route('/train', methods=['POST'])
+def train():
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+        
+    if 'file' not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+        
+    file = request.files['file']
+    doc_type = request.form.get('doc_type', 'unknown')
+    annotations_json = request.form.get('annotations', '{}')
+    
+    try:
+        annotations = json.loads(annotations_json)
+    except:
+        annotations = {}
+        
+    if file.filename == '':
+        return jsonify({"status": "error", "message": "No selected file"}), 400
+        
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        unique_filename = f"{uuid.uuid4()}_{filename}"
+        filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
+        
+        try:
+            # Save the file
+            file.save(filepath)
+            
+            # Extract text from file
+            if filepath.lower().endswith('.pdf'):
+                text = extract_text_from_pdf_without_ocr(filepath) or ""
+                if not text:
+                    # Convert just first page for training
+                    images = convert_from_path(filepath, dpi=150, first_page=1, last_page=1)
+                    if images:
+                        text = pytesseract.image_to_string(images[0])
+                    else:
+                        return jsonify({"status": "error", "message": "Failed to extract text from PDF"}), 500
+            else:
+                # Process image
+                img = Image.open(filepath)
+                text = pytesseract.image_to_string(img)
+            
+            # Clean up file
+            try:
+                os.remove(filepath)
+            except:
+                pass
+                
+            # Train AI processor with extracted text
+            result = ai_processor.train_from_example(text, doc_type, annotations)
+            return jsonify(result)
+            
+        except Exception as e:
+            logging.error(f"Error in training: {e}")
+            # Clean up file on error
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            return jsonify({"status": "error", "message": str(e)}), 500
+            
+    return jsonify({"status": "error", "message": "File type not allowed"}), 400
 
 # Route for Sending Data to Alchemy
 @app.route('/send-to-alchemy', methods=['POST'])

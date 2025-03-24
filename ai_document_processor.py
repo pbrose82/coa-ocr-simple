@@ -99,19 +99,21 @@ class AIDocumentProcessor:
             return f"Error importing model configuration: {e}"
     
     def lazy_load_classifier(self):
-    """Lazy load the classifier only when needed"""
-    if not self.classifier and TRANSFORMERS_AVAILABLE:
-        try:
-            self.classifier = pipeline("zero-shot-classification", 
-                           model="typeform/distilbert-base-uncased-mnli",
-                           device=-1)  # Smaller, lightweight model
-            logging.info("Zero-shot classifier loaded successfully.")
-            return True
-        except Exception as e:
-            logging.error(f"Failed to load classifier: {e}")
-            self.classifier = None
-            return False
-    return self.classifier is not None
+        """Lazy load the classifier only when needed"""
+        if not self.classifier and TRANSFORMERS_AVAILABLE:
+            try:
+                # Use smaller model to avoid memory issues
+                self.classifier = pipeline(
+                    "zero-shot-classification", 
+                    model="typeform/distilbert-base-uncased-mnli",
+                    device=-1  # Force CPU usage
+                )
+                return True
+            except Exception as e:
+                logging.error(f"Failed to load classifier: {e}")
+                return False
+        return self.classifier is not None
+
 
 
     

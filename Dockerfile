@@ -1,11 +1,12 @@
 FROM python:3.9-slim
 
 # Install system dependencies: OCR engine (Tesseract) & PDF utilities (Poppler)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     libtesseract-dev \
     poppler-utils \
-    && rm -rf /var/lib/apt/lists/*
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
 WORKDIR /app
@@ -21,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt || echo "Proceeding without t
 
 # Install PyTorch separately from the official CPU-only wheel source
 RUN pip install --no-cache-dir torch==2.0.1+cpu --index-url https://download.pytorch.org/whl/cpu
+
+# Pre-download transformers model into image (avoids slow cold starts)
+RUN python -c "from transformers import pipeline; pipeline('zero-shot-classification', model='typeform/distilbert-base-uncased-mnli')"
 
 # Copy application code and assets
 COPY app.py ai_document_processor.py ./

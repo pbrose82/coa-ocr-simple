@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-grid.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-theme-alpine.css">
     
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/ocr-styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
     <style>
         .ag-cell {
             font-size: 14px;
@@ -52,6 +52,9 @@
                 Extract text and data from your documents with advanced OCR and AI
                 <a href="/training" class="btn btn-sm btn-outline-primary ms-3">
                     <i class="fas fa-brain me-1"></i> Train AI Model
+                </a>
+                <a href="/model-explorer" class="btn btn-sm btn-outline-info ms-2">
+                    <i class="fas fa-search me-1"></i> Explore AI Models
                 </a>
             </div>
         </div>
@@ -742,5 +745,8 @@
             document.head.appendChild(style);
         });
     </script>
+    
+    <!-- COA Display Fixer -->
+    <script src="{{ url_for('static', filename='js/coa_display_fixer.js') }}"></script>
 </body>
 </html>

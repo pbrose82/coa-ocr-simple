@@ -1,14 +1,15 @@
+# 🔧 Core App Dependencies
 Flask==2.2.3
-Pillow==9.4.0
-pytesseract==0.3.10
-requests==2.28.2
 Werkzeug==2.2.3
 gunicorn==20.1.0
-pdf2image==1.16.3
+requests==2.28.2
 PyPDF2==3.0.1
+pdf2image==1.16.3
+pytesseract==0.3.10
+Pillow==9.4.0
 
 # 🧠 AI & ML Dependencies
-numpy<2
+numpy<2            # Required for PyTorch compatibility on some builds
 scikit-learn>=1.0.2
 transformers==4.28.1
-torch==1.13.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+torch==1.13.1       # Use default CPU version from PyPI

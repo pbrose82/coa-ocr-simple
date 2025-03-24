@@ -103,16 +103,34 @@
     </div>
     
     <!-- App Info Banner -->
-    <div class="tenant-banner">
-        <div class="tenant-container">
-            <div class="tenant-info">
-                Train the AI to recognize and extract data from new document types
-            </div>
+   <!-- Add this code to your training.html file -->
+<!-- Find this section in the template: -->
+<div class="tenant-banner">
+    <div class="tenant-container">
+        <div class="tenant-info">
+            Train the AI to recognize and extract data from new document types
         </div>
-        <a href="/" class="back-button">
-            <i class="fas fa-arrow-left"></i> BACK TO OCR
-        </a>
     </div>
+    <a href="/" class="back-button">
+        <i class="fas fa-arrow-left"></i> BACK TO OCR
+    </a>
+</div>
+
+<!-- Add the Model Explorer button below the existing tenant-info div: -->
+<div class="tenant-banner">
+    <div class="tenant-container">
+        <div class="tenant-info">
+            Train the AI to recognize and extract data from new document types
+            <!-- Add this new button -->
+            <a href="/model-explorer" class="btn btn-sm btn-outline-primary ms-3">
+                <i class="fas fa-search me-1"></i> Explore AI Models
+            </a>
+        </div>
+    </div>
+    <a href="/" class="back-button">
+        <i class="fas fa-arrow-left"></i> BACK TO OCR
+    </a>
+</div>
     
     <!-- Main Content -->
     <div class="main-content" style="max-width: 1200px; display: block;">

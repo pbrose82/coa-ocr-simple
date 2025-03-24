@@ -319,39 +319,64 @@
                 }
             });
             
-            // Process Button click handler
-            processBtn.addEventListener('click', function() {
-                if (!trainingFileInput.files || trainingFileInput.files.length === 0) {
-                    alert('Please select a file to process');
-                    return;
-                }
-                
-                // Show processing status
-                processingStatus.style.display = 'flex';
-                
-                // Simulate file processing
-                setTimeout(() => {
-                    processingStatus.style.display = 'none';
-                    trainingInterface.style.display = 'block';
-                    
-                    // Add sample text based on document type
-                    const docType = documentTypeSelect.value;
-                    
-                    if (docType === 'sds') {
-                        documentContent.textContent = getSampleSDS();
-                    } else if (docType === 'tds') {
-                        documentContent.textContent = getSampleTDS();
-                    } else {
-                        documentContent.textContent = getSampleGeneric();
-                    }
-                    
-                    // Setup text selection
-                    setupTextSelection();
-                    
-                    // Scroll to interface
-                    trainingInterface.scrollIntoView({ behavior: 'smooth' });
-                }, 1500);
-            });
+            // Replace the existing processBtn event handler in training.html with this code
+// Look for: processBtn.addEventListener('click', function() {
+
+processBtn.addEventListener('click', function() {
+    const file = trainingFileInput.files[0];
+    
+    if (!file) {
+        alert('Please select a file to process');
+        return;
+    }
+    
+    // Show processing status
+    processingStatus.style.display = 'flex';
+    
+    // Create form data for actual file upload
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // Send to server for real OCR processing instead of using sample data
+    fetch('/extract', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Hide processing status
+        processingStatus.style.display = 'none';
+        
+        // Show the training interface
+        trainingInterface.style.display = 'block';
+        
+        // Use the actual extracted text instead of sample data
+        if (data.full_text) {
+            documentContent.textContent = data.full_text;
+        } else {
+            // Fallback to sample data if extraction failed
+            const docType = documentTypeSelect.value;
+            if (docType === 'sds') {
+                documentContent.textContent = getSampleSDS();
+            } else if (docType === 'tds') {
+                documentContent.textContent = getSampleTDS();
+            } else {
+                documentContent.textContent = getSampleGeneric();
+            }
+        }
+        
+        // Set up text selection in document content
+        setupTextSelection();
+        
+        // Scroll to the training interface
+        trainingInterface.scrollIntoView({ behavior: 'smooth' });
+    })
+    .catch(error => {
+        console.error('Error processing document:', error);
+        processingStatus.style.display = 'none';
+        alert('Error processing document. Please try again.');
+    });
+});
             
             // Text selection handler
             function setupTextSelection() {

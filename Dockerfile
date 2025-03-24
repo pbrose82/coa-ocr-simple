@@ -1,10 +1,5 @@
 FROM python:3.9-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV RENDER=true
-
 # Install Tesseract OCR and Poppler (needed for PDF processing)
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
@@ -15,18 +10,24 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Create model directory
-RUN mkdir -p /app/models
+# Create necessary directories
+RUN mkdir -p static/css static/js templates models
 
-# Copy requirements and install dependencies
+# Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY . .
+COPY app.py ai_document_processor.py ./
+COPY static/ static/
+COPY templates/ templates/
 
-# Make directories if they don't exist
-RUN mkdir -p static && mkdir -p templates
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Run with gunicorn - Render will set the PORT environment variable
-CMD gunicorn --bind 0.0.0.0:$PORT app:app --timeout 120
+# Expose port
+EXPOSE 5000
+
+# Run the application with gunicorn for production
+CMD gunicorn --bind 0.0.0.0:${PORT:-5000} --timeout 120 app:app

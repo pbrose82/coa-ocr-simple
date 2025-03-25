@@ -319,64 +319,62 @@
                 }
             });
             
-            // Replace the existing processBtn event handler in training.html with this code
-// Look for: processBtn.addEventListener('click', function() {
-
-processBtn.addEventListener('click', function() {
-    const file = trainingFileInput.files[0];
-    
-    if (!file) {
-        alert('Please select a file to process');
-        return;
-    }
-    
-    // Show processing status
-    processingStatus.style.display = 'flex';
-    
-    // Create form data for actual file upload
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    // Send to server for real OCR processing instead of using sample data
-    fetch('/extract', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Hide processing status
-        processingStatus.style.display = 'none';
-        
-        // Show the training interface
-        trainingInterface.style.display = 'block';
-        
-        // Use the actual extracted text instead of sample data
-        if (data.full_text) {
-            documentContent.textContent = data.full_text;
-        } else {
-            // Fallback to sample data if extraction failed
-            const docType = documentTypeSelect.value;
-            if (docType === 'sds') {
-                documentContent.textContent = getSampleSDS();
-            } else if (docType === 'tds') {
-                documentContent.textContent = getSampleTDS();
-            } else {
-                documentContent.textContent = getSampleGeneric();
-            }
-        }
-        
-        // Set up text selection in document content
-        setupTextSelection();
-        
-        // Scroll to the training interface
-        trainingInterface.scrollIntoView({ behavior: 'smooth' });
-    })
-    .catch(error => {
-        console.error('Error processing document:', error);
-        processingStatus.style.display = 'none';
-        alert('Error processing document. Please try again.');
-    });
-});
+            // Process Button handler - FIXED VERSION USING ACTUAL OCR
+            processBtn.addEventListener('click', function() {
+                const file = trainingFileInput.files[0];
+                
+                if (!file) {
+                    alert('Please select a file to process');
+                    return;
+                }
+                
+                // Show processing status
+                processingStatus.style.display = 'flex';
+                
+                // Create form data for actual file upload
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                // Send to server for real OCR processing instead of using sample data
+                fetch('/extract', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide processing status
+                    processingStatus.style.display = 'none';
+                    
+                    // Show the training interface
+                    trainingInterface.style.display = 'block';
+                    
+                    // Use the actual extracted text instead of sample data
+                    if (data.full_text) {
+                        documentContent.textContent = data.full_text;
+                    } else {
+                        // Fallback to sample data if extraction failed
+                        const docType = documentTypeSelect.value;
+                        if (docType === 'sds') {
+                            documentContent.textContent = getSampleSDS();
+                        } else if (docType === 'tds') {
+                            documentContent.textContent = getSampleTDS();
+                        } else {
+                            documentContent.textContent = getSampleGeneric();
+                        }
+                    }
+                    
+                    // Set up text selection in document content
+                    setupTextSelection();
+                    
+                    // Scroll to the training interface
+                    trainingInterface.scrollIntoView({ behavior: 'smooth' });
+                })
+                .catch(error => {
+                    console.error('Error processing document:', error);
+                    processingStatus.style.display = 'none';
+                    alert('Error processing document. Please try again.');
+                });
+            });
             
             // Text selection handler
             function setupTextSelection() {
@@ -468,83 +466,72 @@ processBtn.addEventListener('click', function() {
                 });
             }
             
-            // Save training button handler
-            // Update this code in the saveTrainingBtn event handler in training.html
-// Replace the existing saveTrainingBtn click handler with this implementation
-
-saveTrainingBtn.addEventListener('click', function() {
-    if (mappedFieldsData.length === 0) {
-        alert('Please map at least one field before saving');
-        return;
-    }
-    
-    // Show processing status
-    processingStatus.style.display = 'flex';
-    document.getElementById('statusText').textContent = 'Saving training data...';
-    
-    // Prepare data for the server
-    const formData = new FormData();
-    
-    // Add the original file that was processed
-    if (trainingFileInput.files.length > 0) {
-        formData.append('file', trainingFileInput.files[0]);
-    }
-    
-    // Get the selected document type
-    let docType = documentTypeSelect.value;
-    if (docType === 'custom' && customTypeName.value.trim()) {
-        docType = customTypeName.value.trim();
-    }
-    formData.append('doc_type', docType);
-    
-    // Format the field mappings
-    const annotations = {
-        field_mappings: {}
-    };
-    
-    // Add each mapped field
-    mappedFieldsData.forEach(field => {
-        annotations.field_mappings[field.name] = field.value;
-    });
-    
-    formData.append('annotations', JSON.stringify(annotations));
-    
-    // Send to server
-    fetch('/train', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(result => {
-        // Hide processing status
-        processingStatus.style.display = 'none';
-        
-        if (result.status === 'success') {
-            // Show success message
-            alert('Training data saved successfully! The model has been updated with your training data.');
-            
-            // Reset the interface
-            resetTrainingInterface();
-        } else {
-            // Show error message
-            alert(`Error saving training data: ${result.message || 'Unknown error'}`);
-        }
-    })
-    .catch(error => {
-        // Hide processing status
-        processingStatus.style.display = 'none';
-        
-        console.error('Error saving training data:', error);
-        alert('Error saving training data. Please try again.');
-    });
-});
+            // Save training button handler - FIXED VERSION THAT ACTUALLY SAVES
+            saveTrainingBtn.addEventListener('click', function() {
+                if (mappedFieldsData.length === 0) {
+                    alert('Please map at least one field before saving');
+                    return;
+                }
                 
-                // Simulate saving training data
-                setTimeout(() => {
+                // Show processing status
+                processingStatus.style.display = 'flex';
+                document.getElementById('statusText').textContent = 'Saving training data...';
+                
+                // Prepare data for the server
+                const formData = new FormData();
+                
+                // Add the original file that was processed
+                if (trainingFileInput.files.length > 0) {
+                    formData.append('file', trainingFileInput.files[0]);
+                }
+                
+                // Get the selected document type
+                let docType = documentTypeSelect.value;
+                if (docType === 'custom' && customTypeName.value.trim()) {
+                    docType = customTypeName.value.trim();
+                }
+                formData.append('doc_type', docType);
+                
+                // Format the field mappings
+                const annotations = {
+                    field_mappings: {}
+                };
+                
+                // Add each mapped field
+                mappedFieldsData.forEach(field => {
+                    annotations.field_mappings[field.name] = field.value;
+                });
+                
+                formData.append('annotations', JSON.stringify(annotations));
+                
+                // Send to server
+                fetch('/train', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(result => {
+                    // Hide processing status
                     processingStatus.style.display = 'none';
-                    alert('Training data saved successfully! The system will now use these patterns for future extractions.');
-                    resetTrainingInterface();
-                }, 1500);
+                    
+                    if (result.status === 'success') {
+                        // Show success message
+                        alert('Training data saved successfully! The model has been updated with your training data.');
+                        
+                        // Reset the interface
+                        resetTrainingInterface();
+                    } else {
+                        // Show error message
+                        alert(`Error saving training data: ${result.message || 'Unknown error'}`);
+                    }
+                })
+                .catch(error => {
+                    // Hide processing status
+                    processingStatus.style.display = 'none';
+                    
+                    console.error('Error saving training data:', error);
+                    alert('Error saving training data. Please try again.');
+                });
             });
             
             // Cancel button handler

@@ -922,7 +922,120 @@ class AIDocumentProcessor:
         matches = sum(1 for i in range(min_len) if fp1[i] == fp2[i])
         return matches / min_len
     
-    def train_from_example(self, doc_type, field_name, text_example, value, context_before="", context_after=""):
+    def train_from_example(self, *args, **kwargs):
+        """
+        Train the model with a specific example - supports two calling conventions:
+        
+        Convention 1 (original):
+        train_from_example(self, text, doc_type, annotations)
+        
+        Convention 2 (enhanced):
+        train_from_example(self, doc_type, field_name, text_example, value, context_before="", context_after="")
+        """
+        # Determine which calling convention is being used based on args
+        if len(args) == 2 and 'annotations' in kwargs:
+            # Original calling convention: (text, doc_type, annotations)
+            return self._train_from_annotations(args[0], args[1], kwargs['annotations'])
+        elif len(args) == 3 and isinstance(args[2], dict):
+            # Original calling convention: (text, doc_type, annotations)
+            return self._train_from_annotations(args[0], args[1], args[2])
+        elif len(args) >= 4:
+            # Enhanced calling convention: (doc_type, field_name, text_example, value, ...)
+            doc_type = args[0]
+            field_name = args[1]
+            text_example = args[2]
+            value = args[3]
+            context_before = args[4] if len(args) > 4 else ""
+            context_after = args[5] if len(args) > 5 else ""
+            return self._train_from_field_value(doc_type, field_name, text_example, value, context_before, context_after)
+        else:
+            # Not enough arguments or unrecognized pattern
+            return {"status": "error", "message": "Invalid arguments for train_from_example"}
+            
+    def _train_from_annotations(self, text, doc_type, annotations):
+        """Allow the system to learn from new examples with enhanced pattern creation"""
+        if not text or not doc_type:
+            return {"status": "error", "message": "Missing text or document type"}
+            
+        updated = False
+        
+        # Initialize document fingerprint to help with transfer learning
+        doc_fingerprint = self._compute_document_fingerprint(text)
+        
+        # Log training attempt
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "annotation_count": len(annotations.get('field_mappings', {})),
+            "fields": list(annotations.get('field_mappings', {}).keys()),
+            "document_fingerprint": doc_fingerprint
+        }
+        
+        # Add custom extraction patterns for fields
+        if 'extraction_patterns' in annotations:
+            for field, pattern in annotations['extraction_patterns'].items():
+                # Store pattern for this field in field_patterns
+                if doc_type not in self.field_patterns:
+                    self.field_patterns[doc_type] = {}
+                self.field_patterns[doc_type][field] = pattern
+                
+                # Add to document schemas
+                if doc_type in self.document_schemas:
+                    if field not in self.document_schemas[doc_type]['required_fields']:
+                        self.document_schemas[doc_type]['required_fields'].append(field)
+                        updated = True
+        
+        # Update field mappings
+        if 'field_mappings' in annotations:
+            for field, value in annotations['field_mappings'].items():
+                # Create pattern for exact match (simplified)
+                if value and len(value) > 3:  # Only create patterns for substantial text
+                    # Try to find this value in the text to create context-aware pattern
+                    context_pattern = self._create_context_pattern(text, field, value)
+                    
+                    # Store the pattern
+                    if context_pattern:
+                        if doc_type not in self.field_patterns:
+                            self.field_patterns[doc_type] = {}
+                        self.field_patterns[doc_type][field] = context_pattern
+                    
+                    # Add to document schemas
+                    if doc_type in self.document_schemas:
+                        if field not in self.document_schemas[doc_type]['required_fields']:
+                            self.document_schemas[doc_type]['required_fields'].append(field)
+                            updated = True
+                            
+                    # Store example for transfer learning
+                    if doc_type not in self.document_examples:
+                        self.document_examples[doc_type] = {}
+                    if field not in self.document_examples[doc_type]:
+                        self.document_examples[doc_type][field] = []
+                    
+                    self.document_examples[doc_type][field].append({
+                        "value": value,
+                        "fingerprint": doc_fingerprint,
+                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    })
+        
+        # Add new document type if it doesn't exist
+        if doc_type not in self.document_schemas:
+            self.document_schemas[doc_type] = {
+                'sections': [],
+                'required_fields': list(annotations.get('field_mappings', {}).keys())
+            }
+            updated = True
+            training_record["new_doc_type"] = True
+        
+        # Add to training history
+        self.training_history.append(training_record)
+        
+        # Save model state
+        if updated:
+            self.save_model_state()
+            
+        return {"status": "success", "updated": updated}
+            
+    def _train_from_field_value(self, doc_type, field_name, text_example, value, context_before="", context_after=""):
         """
         Train the model with a specific example
         Args:
@@ -984,7 +1097,7 @@ class AIDocumentProcessor:
         if field_name in self.field_patterns[doc_type]:
             existing_pattern = self.field_patterns[doc_type][field_name]
             # Combine patterns with OR for more robust extraction
-            combined_pattern = f"(?:{existing_pattern})|(?:{pattern})"
+            combined_pattern = "(?:" + existing_pattern + ")|(?:" + pattern + ")"
             self.field_patterns[doc_type][field_name] = combined_pattern
         else:
             self.field_patterns[doc_type][field_name] = pattern

@@ -697,10 +697,12 @@ class AIDocumentProcessor:
         # Build the pattern
         if pattern_parts:
             # Use context before for more specific extraction
-            pattern = f"(?i){pattern_parts[0]}\\s*([^\\n]+)"
+            pattern = "(?i)" + pattern_parts[0] + "\\s*([^\\n]+)"
         else:
             # Fallback to simpler pattern
-            pattern = f"(?i){field_name.replace('_', '\\s+')}\\s*[:.=]\\s*([^\\n]+)"
+            # Avoid using backslashes in f-string expressions
+            replacement = '\\s+'
+            pattern = "(?i)" + field_name.replace('_', replacement) + "\\s*[:.=]\\s*([^\\n]+)"
             
         return pattern
     
@@ -1056,19 +1058,19 @@ class AIDocumentProcessor:
         # Build the pattern
         if escaped_before and escaped_after:
             # With both before and after context
-            pattern = f"{escaped_before}\\s*([^\\n]+?)\\s*{escaped_after}"
+            pattern = escaped_before + "\\s*([^\\n]+?)\\s*" + escaped_after
         elif escaped_before:
             # Only before context
-            pattern = f"{escaped_before}\\s*([^\\n]+)"
+            pattern = escaped_before + "\\s*([^\\n]+)"
         elif escaped_after:
             # Only after context
-            pattern = f"([^\\n]+?)\\s*{escaped_after}"
+            pattern = "([^\\n]+?)\\s*" + escaped_after
         else:
             # Generic pattern as fallback
-            pattern = f"([^\\n]+)"
+            pattern = "([^\\n]+)"
             
         # Make the pattern case-insensitive
-        pattern = f"(?i){pattern}"
+        pattern = "(?i)" + pattern
         
         return pattern
     

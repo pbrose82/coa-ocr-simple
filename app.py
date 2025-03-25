@@ -22,7 +22,7 @@ from pdf2image import convert_from_path
 
 # Import AI Document Processor with error handling
 try:
-    from app.models.ai_document_processor import AIDocumentProcessor
+    from ai_document_processor import AIDocumentProcessor
     ai_available = True
 except ImportError:
     ai_available = False

@@ -1,4 +1,16 @@
-# ai_document_processor.py
+# enhanced_ai_document_processor.py
+# 
+# This enhanced document processor adds:
+# 1. Semi-automated field detection - scans documents for potential field-value pairs
+# 2. Fully automated field inference - automatically identifies key-value pairs and field patterns
+# 3. Transfer learning - applies knowledge from similar documents
+#
+# Features:
+# - Automatic field discovery and training
+# - Context-aware pattern creation
+# - Document similarity detection
+# - Persistent field patterns storage
+# - Dynamic field extraction for any trained field
 
 import re
 import os
@@ -6,13 +18,15 @@ import logging
 import pickle
 import json
 import time
-from collections import defaultdict
+import hashlib
+from collections import defaultdict, Counter
 from datetime import datetime
 
 # Optional scientific and transformer imports
 try:
     import numpy as np
     from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
     AI_IMPORTS_AVAILABLE = True
 except ImportError:
     AI_IMPORTS_AVAILABLE = False
@@ -25,12 +39,53 @@ try:
 except ImportError:
     logging.warning("Transformers library not available, using pattern matching only")
 
-class AIDocumentProcessor:
+class EnhancedAIDocumentProcessor:
     def __init__(self):
         self.classifier = None
         self.document_schemas = {}
         self.training_history = []
-
+        self.document_examples = {}  # Store examples of processed documents for transfer learning
+        self.field_patterns = {}     # Store custom patterns for specific fields
+        self.auto_trained_fields = defaultdict(set)  # Track automatically trained fields by doc type
+        
+        # Common field names and their patterns for automatic detection
+        self.common_fields = {
+            'product_name': [
+                r'(?i)Product\s+Name\s*[:.]\s*([^\n]+)',
+                r'(?i)Product\s+identifier\s*[:.]\s*([^\n]+)',
+                r'(?i)Trade\s+name\s*[:.]\s*([^\n]+)',
+            ],
+            'cas_number': [
+                r'(?i)CAS\s+(?:Number|No|#)\s*[:.]\s*([0-9\-]+)',
+                r'(?i)CAS[:.]\s*([0-9\-]+)',
+                r'\b(\d{2,7}-\d{2}-\d)\b'
+            ],
+            'batch_number': [
+                r'(?i)(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)',
+                r'(?i)(?:Batch|Lot)[:.]\s*([A-Za-z0-9\-]+)'
+            ],
+            'appearance': [
+                r'(?i)Appearance\s+Visual\s+[-–]\s+([^\n]+)',
+                r'(?i)Appearance[:.]\s*([^\n]+)'
+            ],
+            'density': [
+                r'(?i)Density\s+@\s+20[^\s]*\s+ASTM\s+D\s+1298\s+g/ml\s+(\d+\.\d+)',
+                r'(?i)Density[:.]\s*(\d+\.\d+\s*(?:g/cm3|kg/m3|g/mL)?)'
+            ],
+            'purity': [
+                r'(?i)Purity\s+ASTM\s+D\s+3545\s+%\s+wt\s+\d+(?:[^%]+)(\d+\.\d+AC)',
+                r'(?i)(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)',
+                r'(?i)(?:Purity|Assay)(?:\s+Result)?\s*[:.]\s*([\d.]+)'
+            ],
+            'manufacturer': [
+                r'(?i)(?:Manufacturer|Supplier|Company)(?:\s+name)?\s*[.:]?\s*([^\n]+)'
+            ],
+            'date': [
+                r'(?i)(?:Date\s+of\s+(?:Analysis|Test|Manufacture)|Release\s+Date|Analysis\s+Date)\s*[:.]\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})',
+                r'(?i)(?:Date\s+of\s+(?:Analysis|Test|Manufacture)|Release\s+Date|Analysis\s+Date)\s*[:.]\s*(\w+\s+\d{1,2},?\s+\d{4})'
+            ]
+        }
+        
         try:
             self.load_model_state()
         except:
@@ -38,12 +93,16 @@ class AIDocumentProcessor:
 
     def save_model_state(self):
         try:
-            with open("model_state.pkl", "wb") as f:
+            model_path = os.environ.get('MODEL_STATE_PATH', 'model_state.pkl')
+            with open(model_path, "wb") as f:
                 pickle.dump({
                     "document_schemas": self.document_schemas,
-                    "training_history": self.training_history
+                    "training_history": self.training_history,
+                    "document_examples": self.document_examples,
+                    "field_patterns": self.field_patterns,
+                    "auto_trained_fields": self.auto_trained_fields
                 }, f)
-            logging.info("Model state saved to model_state.pkl")
+            logging.info(f"Model state saved to {model_path}")
             return "Model state saved"
         except Exception as e:
             logging.error(f"Error saving model state: {e}")
@@ -51,12 +110,16 @@ class AIDocumentProcessor:
 
     def load_model_state(self):
         try:
-            if os.path.exists("model_state.pkl"):
-                with open("model_state.pkl", "rb") as f:
+            model_path = os.environ.get('MODEL_STATE_PATH', 'model_state.pkl')
+            if os.path.exists(model_path):
+                with open(model_path, "rb") as f:
                     state = pickle.load(f)
                     self.document_schemas = state.get("document_schemas", {})
                     self.training_history = state.get("training_history", [])
-                logging.info("Model state loaded from model_state.pkl")
+                    self.document_examples = state.get("document_examples", {})
+                    self.field_patterns = state.get("field_patterns", {})
+                    self.auto_trained_fields = state.get("auto_trained_fields", defaultdict(set))
+                logging.info(f"Model state loaded from {model_path}")
             else:
                 logging.info("No saved model state found at startup")
         except Exception as e:
@@ -67,6 +130,9 @@ class AIDocumentProcessor:
 
     def get_document_schemas(self):
         return getattr(self, 'document_schemas', {})
+    
+    def get_auto_trained_fields(self):
+        return dict(getattr(self, 'auto_trained_fields', defaultdict(set)))
 
     def export_model_config(self, output_file=None):
         if not output_file:
@@ -75,10 +141,14 @@ class AIDocumentProcessor:
         try:
             training_history = getattr(self, 'training_history', [])
             document_schemas = getattr(self, 'document_schemas', {})
+            field_patterns = getattr(self, 'field_patterns', {})
+            auto_trained_fields = {k: list(v) for k, v in getattr(self, 'auto_trained_fields', defaultdict(set)).items()}
 
             config = {
                 'document_schemas': document_schemas,
                 'training_history': training_history,
+                'field_patterns': field_patterns,
+                'auto_trained_fields': auto_trained_fields,
                 'model_info': {
                     'export_date': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
@@ -102,6 +172,14 @@ class AIDocumentProcessor:
 
             if 'training_history' in config:
                 self.training_history = config['training_history']
+                
+            if 'field_patterns' in config:
+                self.field_patterns = config['field_patterns']
+                
+            if 'auto_trained_fields' in config:
+                self.auto_trained_fields = defaultdict(set)
+                for doc_type, fields in config['auto_trained_fields'].items():
+                    self.auto_trained_fields[doc_type] = set(fields)
 
             self.save_model_state()
             return f"Model configuration imported from {input_file}"
@@ -188,25 +266,9 @@ class AIDocumentProcessor:
 
         return "unknown", 0.3
 
-
-
-    def __init__(self):
-        """Initialize the document processor with default settings"""
-        self.classifier = None  # Initialize classifier as None
-        self.document_schemas = {}  # Initialize empty schemas
-        self.training_history = []  # Initialize empty training history
-
-        # Attempt to load saved model state if it exists
-        try:
-            self.load_model_state()
-        except:
-            logging.info("No saved model state found, initializing new model")
-
-
     def extract_sections(self, text, doc_type):
         """Extract sections from document based on document type"""
         sections = {}
-
         
         if not text:
             return sections
@@ -322,113 +384,172 @@ class AIDocumentProcessor:
         return sections
     
     def extract_entities(self, text, doc_type):
-    """Extract relevant named entities based on document type"""
-    entities = {}
-    
-    if not text:
+        """Extract relevant named entities based on document type"""
+        entities = {}
+        
+        if not text:
+            return entities
+        
+        # Common fields across document types
+        product_name = self._extract_product_name(text)
+        if product_name:
+            entities['product_name'] = product_name
+                
+        # Document-specific field extraction
+        if doc_type == "sds":
+            # Extract GHS hazard codes
+            hazard_codes = re.findall(r'\b(H\d{3}[A-Za-z]?)\b', text)
+            if hazard_codes:
+                entities['hazard_codes'] = list(set(hazard_codes))
+                
+            # Extract emergency contact
+            emergency = re.search(r'(?i)Emergency\s+(?:telephone|phone|contact)(?:\s+number)?\s*[.:]?\s*([0-9()\s\-+]{7,20})', text)
+            if emergency:
+                entities['emergency_contact'] = emergency.group(1).strip()
+                
+            # Extract manufacturer/supplier
+            manufacturer = re.search(r'(?i)(?:Manufacturer|Supplier|Company)(?:\s+name)?\s*[.:]?\s*([^\n]+)', text)
+            if manufacturer:
+                entities['manufacturer'] = manufacturer.group(1).strip()
+                
+            # Extract CAS numbers
+            cas_numbers = re.findall(r'\b(\d{2,7}-\d{2}-\d)\b', text)
+            if cas_numbers:
+                entities['cas_numbers'] = list(set(cas_numbers))
+                
+        elif doc_type == "tds":
+            # Extract physical properties
+            density = re.search(r'(?i)(?:Density|Specific\s+Gravity)\s*[:.]\s*([\d.,]+\s*(?:g/cm3|kg/m3|g/mL))', text)
+            if density:
+                entities['density'] = density.group(1).strip()
+                
+            viscosity = re.search(r'(?i)Viscosity\s*[:.]\s*([\d.,]+\s*(?:mPas|cP|Pa\.s))', text)
+            if viscosity:
+                entities['viscosity'] = viscosity.group(1).strip()
+                
+            flash_point = re.search(r'(?i)Flash\s+Point\s*[:.]\s*([\d.,]+\s*(?:°C|°F))', text)
+            if flash_point:
+                entities['flash_point'] = flash_point.group(1).strip()
+                
+            # Extract storage conditions
+            storage = re.search(r'(?i)Storage(?:\s+conditions?)?\s*[:.]\s*([^\n]+)', text)
+            if storage:
+                entities['storage_conditions'] = storage.group(1).strip()
+                
+        elif doc_type == "coa":
+            # Enhanced COA extraction with dynamic field support
+            
+            # Standard field extractions (batch number, lot number, etc.)
+            batch_patterns = [
+                r'(?i)(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)',
+                r'(?i)(?:Batch|Lot)[:.]\s*([A-Za-z0-9\-]+)',
+                r'(?i)(?:Batch|Lot)\s*(?:Number|No|#)?\s*[:.]\s*([A-Za-z0-9\-]+)'
+            ]
+            
+            for pattern in batch_patterns:
+                batch_match = re.search(pattern, text)
+                if batch_match:
+                    batch_value = batch_match.group(1).strip()
+                    entities['batch_number'] = batch_value
+                    entities['lot_number'] = batch_value  # Store in both fields for compatibility
+                    break
+                    
+            # Extract CAS number
+            cas_patterns = [
+                r'(?i)CAS\s+(?:Number|No|#)\s*[:.]\s*([0-9\-]+)',
+                r'(?i)CAS[:.]\s*([0-9\-]+)',
+                r'\b(\d{2,7}-\d{2}-\d)\b'  # General CAS pattern
+            ]
+            
+            for pattern in cas_patterns:
+                cas_match = re.search(pattern, text)
+                if cas_match:
+                    entities['cas_number'] = cas_match.group(1).strip()
+                    break
+            
+            # Appearance extraction
+            appearance_patterns = [
+                r'(?i)Appearance\s+Visual\s+[-–]\s+([^\n]+)',
+                r'(?i)Appearance[:.]\s*([^\n]+)'
+            ]
+            
+            for pattern in appearance_patterns:
+                appearance_match = re.search(pattern, text)
+                if appearance_match:
+                    entities['appearance'] = appearance_match.group(1).strip()
+                    break
+            
+            # Density extraction
+            density_patterns = [
+                r'(?i)Density\s+@\s+20[^\s]*\s+ASTM\s+D\s+1298\s+g/ml\s+(\d+\.\d+)',
+                r'(?i)Density[:.]\s*(\d+\.\d+)'
+            ]
+            
+            for pattern in density_patterns:
+                density_match = re.search(pattern, text)
+                if density_match:
+                    entities['density'] = density_match.group(1).strip()
+                    break
+            
+            # Purity extraction with improved patterns
+            purity_patterns = [
+                r'(?i)Purity\s+ASTM\s+D\s+3545\s+%\s+wt\s+\d+(?:[^%]+)(\d+\.\d+AC)',
+                r'(?i)(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)',
+                r'(?i)(?:Purity|Assay)(?:\s+Result)?\s*[:.]\s*([\d.]+)'
+            ]
+            
+            for pattern in purity_patterns:
+                purity_match = re.search(pattern, text)
+                if purity_match:
+                    entities['purity'] = purity_match.group(1).strip()
+                    break
+            
+            # Dynamic extraction based on trained fields
+            # Check if we have document schemas
+            if hasattr(self, 'document_schemas') and doc_type in self.document_schemas:
+                schema = self.document_schemas[doc_type]
+                
+                # Go through trained fields that we haven't extracted yet
+                for field in schema.get('required_fields', []):
+                    if field not in entities:
+                        # Check if we have a custom pattern for this field
+                        if field in self.field_patterns.get(doc_type, {}):
+                            # Use custom pattern
+                            pattern = self.field_patterns[doc_type][field]
+                            field_match = re.search(pattern, text)
+                            if field_match:
+                                entities[field] = field_match.group(1).strip()
+                        else:
+                            # Use default pattern
+                            field_pattern = r'(?i)' + field.replace('_', '\s+') + r'\s*[:.]\s*([^\n]+)'
+                            field_match = re.search(field_pattern, text)
+                            if field_match:
+                                entities[field] = field_match.group(1).strip()
+            
+            # Extract test results
+            test_results = self._extract_test_results(text)
+            if test_results:
+                entities['test_results'] = test_results
+                
+        # Run dynamic discovery for auto-training on any document type
+        if hasattr(self, 'auto_trained_fields'):
+            # Find fields we've already auto-trained on this doc type
+            auto_trained = self.auto_trained_fields.get(doc_type, set())
+            
+            # Discover new fields automatically if we have auto-discovery enabled
+            auto_discovered = self._discover_fields(text, doc_type, auto_trained)
+            
+            # Add newly discovered fields to entities if not already present
+            for field, value in auto_discovered.items():
+                if field not in entities:
+                    entities[field] = value
+                    
+                    # Mark this field as auto-trained for this document type
+                    if doc_type not in self.auto_trained_fields:
+                        self.auto_trained_fields[doc_type] = set()
+                    self.auto_trained_fields[doc_type].add(field)
+                
         return entities
-    
-    # Common fields across document types
-    product_name = self._extract_product_name(text)
-    if product_name:
-        entities['product_name'] = product_name
-            
-    # Document-specific field extraction
-    if doc_type == "sds":
-        # SDS extraction code (unchanged)
-        # ...
-        
-    elif doc_type == "tds":
-        # TDS extraction code (unchanged)
-        # ...
-        
-    elif doc_type == "coa":
-        # Enhanced COA extraction with dynamic field support
-        
-        # Standard field extractions (batch number, lot number, etc.)
-        batch_patterns = [
-            r'(?i)(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)',
-            r'(?i)(?:Batch|Lot)[:.]\s*([A-Za-z0-9\-]+)',
-            r'(?i)(?:Batch|Lot)\s*(?:Number|No|#)?\s*[:.]\s*([A-Za-z0-9\-]+)'
-        ]
-        
-        for pattern in batch_patterns:
-            batch_match = re.search(pattern, text)
-            if batch_match:
-                entities['batch_number'] = batch_match.group(1).strip()
-                entities['lot_number'] = batch_match.group(1).strip()
-                break
-        
-        # CAS number extraction
-        cas_patterns = [
-            r'(?i)CAS\s+(?:Number|No|#)\s*[:.]\s*([0-9\-]+)',
-            r'(?i)CAS[:.]\s*([0-9\-]+)',
-            r'\b(\d{2,7}-\d{2}-\d)\b'
-        ]
-        
-        for pattern in cas_patterns:
-            cas_match = re.search(pattern, text)
-            if cas_match:
-                entities['cas_number'] = cas_match.group(1).strip()
-                break
-        
-        # Appearance extraction
-        appearance_patterns = [
-            r'(?i)Appearance\s+Visual\s+[-–]\s+([^\n]+)',
-            r'(?i)Appearance[:.]\s*([^\n]+)'
-        ]
-        
-        for pattern in appearance_patterns:
-            appearance_match = re.search(pattern, text)
-            if appearance_match:
-                entities['appearance'] = appearance_match.group(1).strip()
-                break
-        
-        # Density extraction
-        density_patterns = [
-            r'(?i)Density\s+@\s+20[^\s]*\s+ASTM\s+D\s+1298\s+g/ml\s+(\d+\.\d+)',
-            r'(?i)Density[:.]\s*(\d+\.\d+)'
-        ]
-        
-        for pattern in density_patterns:
-            density_match = re.search(pattern, text)
-            if density_match:
-                entities['density'] = density_match.group(1).strip()
-                break
-        
-        # Purity extraction with improved patterns
-        purity_patterns = [
-            r'(?i)Purity\s+ASTM\s+D\s+3545\s+%\s+wt\s+\d+(?:[^%]+)(\d+\.\d+AC)',
-            r'(?i)(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)',
-            r'(?i)(?:Purity|Assay)(?:\s+Result)?\s*[:.]\s*([\d.]+)'
-        ]
-        
-        for pattern in purity_patterns:
-            purity_match = re.search(pattern, text)
-            if purity_match:
-                entities['purity'] = purity_match.group(1).strip()
-                break
-        
-        # Dynamic extraction based on trained fields
-        # Check if we have document schemas
-        if hasattr(self, 'document_schemas') and doc_type in self.document_schemas:
-            schema = self.document_schemas[doc_type]
-            
-            # Go through trained fields that we haven't extracted yet
-            for field in schema.get('required_fields', []):
-                if field not in entities and field not in ['batch_number', 'lot_number', 'cas_number', 'purity', 'appearance', 'density']:
-                    # Simple pattern based on field name
-                    field_pattern = r'(?i)' + field.replace('_', '\s+') + r'\s*[:.]\s*([^\n]+)'
-                    field_match = re.search(field_pattern, text)
-                    if field_match:
-                        entities[field] = field_match.group(1).strip()
-                        
-        # Get test results if needed (unchanged)
-        test_results = self._extract_test_results(text)
-        if test_results:
-            entities['test_results'] = test_results
-            
-    return entities
 
     def _extract_product_name(self, text):
         """Extract product name from document text"""
@@ -535,141 +656,79 @@ class AIDocumentProcessor:
         
         return test_results
     
-    def train_from_example(self, text, doc_type, annotations):
-        """Allow the system to learn from new examples - lightweight version"""
-        if not text or not doc_type:
-            return {"status": "error", "message": "Missing text or document type"}
+    def _discover_fields(self, text, doc_type, already_trained_fields):
+        """Discover new fields automatically using patterns and heuristics"""
+        discovered_fields = {}
+        
+        # Skip if text is too short
+        if not text or len(text) < 50:
+            return discovered_fields
             
-        updated = False
+        # Try to find fields using common patterns
+        # Look for patterns like "Field Name: Value" throughout the document
+        key_value_patterns = [
+            r'(?im)^([A-Z][A-Za-z0-9\s\-]{2,30})\s*[:.]\s*([^\n]+)$',  # Line starting with capitalized word(s) followed by : or .
+            r'(?i)([A-Za-z][A-Za-z0-9\s\-]{2,30})\s*[:.]\s+([^\n\r]{1,100}(?:\n|\r|$))'  # More general pattern
+        ]
         
-        # Log training attempt
-        training_record = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "doc_type": doc_type,
-            "annotation_count": len(annotations.get('field_mappings', {})),
-            "fields": list(annotations.get('field_mappings', {}).keys())
-        }
-        
-        # Add custom extraction patterns for fields
-        if 'extraction_patterns' in annotations:
-            for field, pattern in annotations['extraction_patterns'].items():
-                # Add to document schemas
-                if doc_type in self.document_schemas:
-                    if field not in self.document_schemas[doc_type]['required_fields']:
-                        self.document_schemas[doc_type]['required_fields'].append(field)
-                        updated = True
-        
-        # Update field mappings
-        if 'field_mappings' in annotations:
-            for field, value in annotations['field_mappings'].items():
-                # Create pattern for exact match (simplified)
-                if value and len(value) > 3:  # Only create patterns for substantial text
-                    # Add to document schemas
-                    if doc_type in self.document_schemas:
-                        if field not in self.document_schemas[doc_type]['required_fields']:
-                            self.document_schemas[doc_type]['required_fields'].append(field)
-                            updated = True
-        
-        # Add new document type if it doesn't exist
-        if doc_type not in self.document_schemas:
-            self.document_schemas[doc_type] = {
-                'sections': [],
-                'required_fields': list(annotations.get('field_mappings', {}).keys())
-            }
-            updated = True
-            training_record["new_doc_type"] = True
-        
-        # Add to training history
-        self.training_history.append(training_record)
-        
-        # Save model state if updates were made
-        if updated:
-            save_result = self.save_model_state()
-            return {"status": "success", "message": f"Updated extraction rules for {doc_type}", "details": save_result}
-        else:
-            return {"status": "warning", "message": "No updates were made to the model"}
-    
-    def reset_document_schema(self, doc_type):
-        """Reset a document schema to default (for troubleshooting)"""
-        if doc_type == "sds":
-            self.document_schemas["sds"] = {
-                'sections': ['Identification', 'Hazards Identification', 'Composition', 
-                            'First-Aid Measures', 'Fire-Fighting Measures', 'Accidental Release',
-                            'Handling and Storage', 'Exposure Controls', 'Physical Properties',
-                            'Stability and Reactivity', 'Toxicological Information'],
-                'required_fields': ['product_identifier', 'manufacturer', 'emergency_phone']
-            }
-        elif doc_type == "tds":
-            self.document_schemas["tds"] = {
-                'sections': ['Product Description', 'Features', 'Applications', 
-                            'Technical Data', 'Processing', 'Storage', 'Packaging'],
-                'required_fields': ['product_name', 'manufacturer', 'physical_properties']
-            }
-        elif doc_type == "coa":
-            self.document_schemas["coa"] = {
-                'sections': ['Product Information', 'Test Results', 'Specifications'],
-                'required_fields': ['product_name', 'batch_number', 'lot_number', 'test_results', 'purity']
-            }
-        else:
-            return {"status": "error", "message": f"Unknown document type: {doc_type}"}
+        for pattern in key_value_patterns:
+            for match in re.finditer(pattern, text):
+                key = match.group(1).strip()
+                value = match.group(2).strip()
+                
+                # Skip if empty value or too short
+                if not value or len(value) < 2:
+                    continue
+                    
+                # Convert key to field name format (lowercase, underscores)
+                field_name = key.lower().replace(' ', '_').replace('-', '_')
+                
+                # Skip common words that aren't likely to be fields
+                if field_name in ['the', 'and', 'for', 'this', 'with', 'from']:
+                    continue
+                    
+                # Skip if this field is already trained
+                if field_name in already_trained_fields:
+                    continue
+                    
+                # Skip fields we already extracted
+                if field_name in discovered_fields:
+                    continue
+                    
+                # Add to discovered fields
+                discovered_fields[field_name] = value
+                
+        # Try to find fields based on common document structure patterns
+        for field_name, patterns in self.common_fields.items():
+            # Skip if we already have this field or it's already trained
+            if field_name in discovered_fields or field_name in already_trained_fields:
+                continue
+                
+            # Try each pattern for this common field
+            for pattern in patterns:
+                match = re.search(pattern, text)
+                if match:
+                    value = match.group(1).strip()
+                    discovered_fields[field_name] = value
+                    break
+                    
+        # Try to detect table structures for test results or specifications
+        if 'test_results' not in discovered_fields and 'test_results' not in already_trained_fields:
+            table_detected = False
+            table_headers = [
+                r'(?i)(?:Test|Parameter|Property)\s+(?:Specification|Spec|Limit)\s+(?:Result|Value|Reading)',
+                r'(?i)(?:Attribute|Characteristic)\s+(?:Specification|Requirement)\s+(?:Result|Observation)',
+                r'(?i)(?:Parameter|Test)\s+(?:Method|Standard)\s+(?:Unit)\s+(?:Specification)\s+(?:Result)'
+            ]
             
-        # Save the updated schema
-        self.save_model_state()
-        return {"status": "success", "message": f"Reset schema for {doc_type} to default"}
-    
-    def add_extraction_rule(self, doc_type, field, pattern):
-        """Add a custom extraction rule"""
-        if doc_type not in self.document_schemas:
-            return {"status": "error", "message": f"Unknown document type: {doc_type}"}
-            
-        # Add field to required fields if not present
-        if field not in self.document_schemas[doc_type]['required_fields']:
-            self.document_schemas[doc_type]['required_fields'].append(field)
-            
-        # In a more advanced implementation, we would store patterns here
-        # For this simplified version, we just record the change
-        training_record = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "doc_type": doc_type,
-            "action": "add_rule",
-            "field": field,
-            "pattern": pattern
-        }
+            for header_pattern in table_headers:
+                if re.search(header_pattern, text):
+                    table_detected = True
+                    break
+                    
+            if table_detected:
+                test_results = self._extract_test_results(text)
+                if test_results:
+                    discovered_fields['test_results'] = test_results
         
-        self.training_history.append(training_record)
-        
-        # Save model state
-        self.save_model_state()
-        
-        return {"status": "success", "message": f"Added extraction rule for {field} in {doc_type}"}
-    
-    def process_document(self, text):
-        """Process document text and extract structured information"""
-        if not text:
-            return {
-                "document_type": "unknown",
-                "confidence": 0.0,
-                "entities": {},
-                "sections": {},
-                "full_text": ""
-            }
-            
-        # First, classify the document
-        doc_type, confidence = self.classify_document(text)
-        
-        # Extract document sections based on type
-        sections = self.extract_sections(text, doc_type)
-        
-        # Extract named entities
-        entities = self.extract_entities(text, doc_type)
-        
-        # Combine results
-        result = {
-            "document_type": doc_type,
-            "confidence": confidence,
-            "entities": entities,
-            "sections": sections,
-            "full_text": text
-        }
-        
-        return result
+        return discovered_fields

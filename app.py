@@ -852,6 +852,9 @@ def model_explorer():
 # Replace the get_model_data route with this version that handles
 # cases where methods might be missing from your AI processor
 
+# Update the get_model_data function in app.py
+# Replace the existing function with this improved version
+
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""
@@ -859,6 +862,14 @@ def get_model_data():
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
+        # Force reload the model state from disk to get latest changes
+        try:
+            if hasattr(ai_processor, 'load_model_state'):
+                ai_processor.load_model_state()
+                logging.info("Reloaded model state from disk")
+        except Exception as e:
+            logging.warning(f"Unable to reload model state: {e}")
+        
         # Get model information - handle missing methods
         document_schemas = {}
         try:
@@ -908,12 +919,16 @@ def get_model_data():
                 "examples": examples
             }
         
+        # Log the response for debugging
+        logging.info(f"Model data response: {len(document_schemas)} schemas, {len(training_history)} training events")
+        
         return jsonify({
             "status": "success",
             "document_schemas": document_schemas,
             "training_history": history_by_type,
             "field_counts": field_counts,
-            "extraction_examples": extraction_examples
+            "extraction_examples": extraction_examples,
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # Add timestamp for debugging
         })
     except Exception as e:
         logging.error(f"Error getting model data: {e}")

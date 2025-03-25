@@ -22,7 +22,7 @@ from pdf2image import convert_from_path
 
 # Import AI Document Processor with error handling
 try:
-    from ai_document_processor import AIDocumentProcessor
+    from enhanced_ai_document_processor import EnhancedAIDocumentProcessor
     ai_available = True
 except ImportError:
     ai_available = False
@@ -57,14 +57,15 @@ if not os.path.exists(CONFIG_DIR):
 # Global Token Cache
 token_cache = {}
 
+
 # Initialize AI processor
 ai_processor = None
 if ai_available:
     try:
-        ai_processor = AIDocumentProcessor()
-        logging.info("AI Document Processor initialized successfully")
+        ai_processor = EnhancedAIDocumentProcessor()
+        logging.info("Enhanced AI Document Processor initialized successfully")
     except Exception as e:
-        logging.error(f"Error initializing AI Document Processor: {e}")
+        logging.error(f"Error initializing Enhanced AI Document Processor: {e}")
 
 # Configuration Management Functions
 def ensure_config_directory():

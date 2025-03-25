@@ -39,7 +39,7 @@ try:
 except ImportError:
     logging.warning("Transformers library not available, using pattern matching only")
 
-class EnhancedAIDocumentProcessor:
+class AIDocumentProcessor:
     def __init__(self):
         self.classifier = None
         self.document_schemas = {}

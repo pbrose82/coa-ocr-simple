@@ -366,6 +366,7 @@
 // <div id="extractedDataGrid" class="ag-theme-alpine" style="height: auto; min-height: 400px; width: 100%;"></div>
 
 // Then update the initializeGrid function:
+// Replace the existing initializeGrid function in index.html with this version
 function initializeGrid() {
     const gridDiv = document.getElementById('extractedDataGrid');
     
@@ -376,7 +377,7 @@ function initializeGrid() {
             field: 'field',
             cellClass: 'field-label',
             minWidth: 150,
-            maxWidth: 250,
+            maxWidth: 220,
             filter: true,
             floatingFilter: true,
             sortable: true
@@ -410,10 +411,18 @@ function initializeGrid() {
         headerHeight: 40,
         getRowHeight: function(params) {
             // Check if we have HTML content that needs more space
-            if (params.data && params.data.value && 
-                typeof params.data.value === 'string' && 
-                params.data.value.includes('<table')) {
-                return 300; // Give test results more space
+            if (params.data && params.data.field) {
+                if (params.data.field === 'Formatted Test Results' || 
+                    params.data.field.includes('Test Results')) {
+                    return 300; // Give test results more space
+                }
+                
+                // Check if the value contains HTML
+                if (params.data.value && 
+                    typeof params.data.value === 'string' && 
+                    params.data.value.includes('<')) {
+                    return 200; // Give HTML content more space
+                }
             }
             return 48; // Default row height
         },
@@ -425,38 +434,56 @@ function initializeGrid() {
             window.addEventListener('resize', function() {
                 setTimeout(function() {
                     params.api.sizeColumnsToFit();
-                });
+                }, 100);
             });
+        },
+        onFirstDataRendered: function(params) {
+            // Once data is loaded, resize columns
+            params.api.sizeColumnsToFit();
         }
     };
     
     // Create grid
     extractedDataGrid = new agGrid.Grid(gridDiv, gridOptions);
+    
+    // Add an event listener for window load to ensure proper sizing
+    window.addEventListener('load', function() {
+        if (gridOptions.api) {
+            setTimeout(function() {
+                gridOptions.api.sizeColumnsToFit();
+            }, 200);
+        }
+    });
+    
     return gridOptions;
 }
 
-// Improve the HtmlCellRenderer implementation
+// Define the HtmlCellRenderer here
 class HtmlCellRenderer {
     init(params) {
         this.eGui = document.createElement('div');
         this.eGui.style.width = '100%';
         this.eGui.style.height = '100%';
         this.eGui.style.overflow = 'auto';
+        this.eGui.style.padding = '2px';
         
         if (params.value === null || params.value === undefined) {
             this.eGui.innerHTML = '';
             return;
         }
 
-        if (typeof params.value === 'string' && params.value.trim().startsWith('<table')) {
+        if (typeof params.value === 'string' && params.value.trim().startsWith('<')) {
+            // This is HTML content (like test results)
             this.eGui.innerHTML = params.value;
             
-            // Ensure tables take full width
+            // Apply styles to tables to ensure they use full width
             const tables = this.eGui.querySelectorAll('table');
             tables.forEach(table => {
                 table.style.width = '100%';
+                table.style.tableLayout = 'fixed';
             });
         } else {
+            // Plain text content
             this.eGui.textContent = params.value;
         }
     }

@@ -1,4 +1,4 @@
-# enhanced_ai_document_processor.py
+# ai_document_processor.py
 # 
 # This enhanced document processor adds:
 # 1. Semi-automated field detection - scans documents for potential field-value pairs
@@ -550,185 +550,414 @@ class AIDocumentProcessor:
                     self.auto_trained_fields[doc_type].add(field)
                 
         return entities
-
-    def _extract_product_name(self, text):
-        """Extract product name from document text"""
-        # Try several patterns for product name
-        patterns = [
-            r'(?i)Product\s+Name\s*[:.]\s*([^\n]+)',
-            r'(?i)Product\s+identifier\s*[:.]\s*([^\n]+)',
-            r'(?i)Trade\s+name\s*[:.]\s*([^\n]+)',
-            r'(?i)Material\s+name\s*[:.]\s*([^\n]+)',
-            r'(?i)Product:\s*([^\n]+)'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1).strip()
-        
-        return None
     
-    def _extract_test_results(self, text):
-        """Extract test results from COA documents"""
-        test_results = {}
+    def process_document(self, text):
+        """Process document text and extract structured information with enhanced intelligence"""
+        if not text:
+            return {
+                "document_type": "unknown",
+                "confidence": 0.0,
+                "entities": {},
+                "sections": {},
+                "full_text": ""
+            }
+            
+        # First, classify the document
+        doc_type, confidence = self.classify_document(text)
         
-        # Look for common test result formats
+        # Extract document sections based on type
+        sections = self.extract_sections(text, doc_type)
         
-        # Format 1: Parameter/Specification/Result table pattern
-        table_pattern = r'(?i)(?:Parameter|Test|Property|Description)\s+(?:Specification|Spec|Limit)\s+(?:Result|Value|Reading)'
-        table_match = re.search(table_pattern, text)
+        # Try to leverage transfer learning for similar documents
+        similar_docs = self.get_similar_documents(text, doc_type)
         
-        if table_match:
-            # Find the start of the table
-            table_start = table_match.start()
+        # Apply auto-training if this is a new document format we haven't seen
+        # Only do this if we're confident about the document type
+        if confidence > 0.6 and doc_type != "unknown":
+            self.auto_train_all_fields(text, doc_type)
+        
+        # Extract named entities with enhanced learning
+        entities = self.extract_entities(text, doc_type)
+        
+        # Combine results
+        result = {
+            "document_type": doc_type,
+            "confidence": confidence,
+            "entities": entities,
+            "sections": sections,
+            "full_text": text
+        }
+        
+        # Include similar documents data if any found
+        if similar_docs:
+            result["similar_documents"] = similar_docs
+        
+        return result
+    
+    def train_from_example(self, text, doc_type, annotations):
+        """Allow the system to learn from new examples with enhanced pattern creation"""
+        if not text or not doc_type:
+            return {"status": "error", "message": "Missing text or document type"}
             
-            # Find the end of the table (look for empty lines or certain phrases)
-            end_markers = [
-                r'\n\s*\n',
-                r'(?:This lot|Analysis|Conclusion)',
-                r'(?:for laboratory use|store at)'
-            ]
-            
-            table_end = len(text)
-            for marker in end_markers:
-                end_match = re.search(marker, text[table_start:], re.IGNORECASE)
-                if end_match:
-                    potential_end = table_start + end_match.start()
-                    if potential_end < table_end:
-                        table_end = potential_end
-            
-            # Extract table content
-            table_content = text[table_start:table_end]
-            
-            # Parse lines to extract test results
-            lines = table_content.split('\n')
-            current_parameter = None
-            
-            for i, line in enumerate(lines):
-                if i == 0:  # Skip header row
-                    continue
-                    
-                # Skip empty lines
-                if not line.strip():
-                    continue
+        updated = False
+        
+        # Initialize document fingerprint to help with transfer learning
+        doc_fingerprint = self._compute_document_fingerprint(text)
+        
+        # Log training attempt
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "annotation_count": len(annotations.get('field_mappings', {})),
+            "fields": list(annotations.get('field_mappings', {}).keys()),
+            "document_fingerprint": doc_fingerprint
+        }
+        
+        # Add custom extraction patterns for fields
+        if 'extraction_patterns' in annotations:
+            for field, pattern in annotations['extraction_patterns'].items():
+                # Store pattern for this field in field_patterns
+                if doc_type not in self.field_patterns:
+                    self.field_patterns[doc_type] = {}
+                self.field_patterns[doc_type][field] = pattern
                 
-                # Try to parse as "Parameter Specification Result"
-                parts = re.split(r'\s{2,}|\t', line.strip())
-                
-                # Clean parts and remove any empty strings
-                parts = [p.strip() for p in parts if p.strip()]
-                
-                if len(parts) >= 2:
-                    # Found a test result
-                    test_name = parts[0]
+                # Add to document schemas
+                if doc_type in self.document_schemas:
+                    if field not in self.document_schemas[doc_type]['required_fields']:
+                        self.document_schemas[doc_type]['required_fields'].append(field)
+                        updated = True
+        
+        # Update field mappings
+        if 'field_mappings' in annotations:
+            for field, value in annotations['field_mappings'].items():
+                # Create pattern for exact match (simplified)
+                if value and len(value) > 3:  # Only create patterns for substantial text
+                    # Try to find this value in the text to create context-aware pattern
+                    context_pattern = self._create_context_pattern(text, field, value)
                     
-                    # Handle different formats
-                    if len(parts) >= 3:
-                        specification = parts[1]
-                        result = parts[2]
-                    else:
-                        specification = ""
-                        result = parts[1]
+                    # Store the pattern
+                    if context_pattern:
+                        if doc_type not in self.field_patterns:
+                            self.field_patterns[doc_type] = {}
+                        self.field_patterns[doc_type][field] = context_pattern
                     
-                    test_results[test_name] = {
-                        "specification": specification,
-                        "result": result
+                    # Add to document schemas
+                    if doc_type in self.document_schemas:
+                        if field not in self.document_schemas[doc_type]['required_fields']:
+                            self.document_schemas[doc_type]['required_fields'].append(field)
+                            updated = True
+                            
+                    # Store example for transfer learning
+                    if doc_type not in self.document_examples:
+                        self.document_examples[doc_type] = {}
+                    if field not in self.document_examples[doc_type]:
+                        self.document_examples[doc_type][field] = []
+                    
+                    self.document_examples[doc_type][field].append({
+                        "value": value,
+                        "fingerprint": doc_fingerprint,
+                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    })
+        
+        # Add new document type if it doesn't exist
+        if doc_type not in self.document_schemas:
+            self.document_schemas[doc_type] = {
+                'sections': [],
+                'required_fields': list(annotations.get('field_mappings', {}).keys())
+            }
+            updated = True
+            training_record["new_doc_type"] = True
+        
+        # Add to training history
+        self.training_history.append(training_record)
+        
+        # Also perform automatic field discovery on this document
+        auto_fields = self._discover_fields(text, doc_type, set(annotations.get('field_mappings', {}).keys()))
+        
+        # Add discovered fields to the schema if not already present
+            for field in auto_fields:
+                if field not in self.document_schemas[doc_type]['required_fields']:
+                    self.document_schemas[doc_type]['required_fields'].append(field)
+                    self.document_schemas[doc_type]['auto_trained'].append(field)
+                    updated = True
+                    
+                    # Store the field pattern for future extraction
+                    pattern = auto_fields[field]['pattern']
+                    if 'field_patterns' not in self.document_schemas[doc_type]:
+                        self.document_schemas[doc_type]['field_patterns'] = {}
+                    self.document_schemas[doc_type]['field_patterns'][field] = pattern
+                    
+                    # Add to training history
+                    training_record = {
+                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "doc_type": doc_type,
+                        "field": field,
+                        "action": "auto_train",
+                        "pattern": pattern,
+                        "value": auto_fields[field]['value']
                     }
-        
-        # Format 2: Key-value pairs for test results
-        if not test_results:
-            # Look for patterns like "Test Name: Result" or "Test Name: Spec - Result"
-            test_pattern = r'(?i)([A-Za-z0-9\s\-]+):\s*((?:[\d\.<>]+\s*(?:ppm|%|mg|g)){0,1}(?:[A-Za-z]+\s*)?(?:-\s*)?)((?:[\d\.<>]+\s*(?:ppm|%|mg|g))(?:\s*[A-Za-z]+)?|PASS|FAIL|Conforms)'
+                    self.training_history.append(training_record)
             
-            for match in re.finditer(test_pattern, text):
-                test_name = match.group(1).strip()
-                specification = match.group(2).strip()
-                result = match.group(3).strip()
-                
-                if result and (not specification or specification == "-" or specification == result):
-                    specification = ""
-                
-                test_results[test_name] = {
-                    "specification": specification,
-                    "result": result
-                }
+            # Save the updated schema
+            if updated:
+                self.save_model_state()
+                return {"status": "success", "fields": list(auto_fields.keys())}
+            else:
+                return {"status": "info", "message": "No new fields to add"}
+
+    def _compute_document_fingerprint(self, text):
+        """
+        Create a fingerprint of the document for similarity comparison
+        This helps with transfer learning between similar documents
+        """
+        # Basic fingerprint based on document structure
+        lines = text.split('\n')
+        short_lines = [line.strip()[:50] for line in lines if len(line.strip()) > 0][:20]
         
-        return test_results
+        # Create a simple fingerprint from the first 20 non-empty lines
+        fingerprint = "".join([line[:2] for line in short_lines])
+        
+        # Add length information
+        fingerprint += f"_L{len(text)//100}"
+        
+        return fingerprint
     
-    def _discover_fields(self, text, doc_type, already_trained_fields):
-        """Discover new fields automatically using patterns and heuristics"""
-        discovered_fields = {}
-        
-        # Skip if text is too short
-        if not text or len(text) < 50:
-            return discovered_fields
+    def _compute_fingerprint_similarity(self, fp1, fp2):
+        """
+        Calculate similarity between two document fingerprints
+        Returns a value between 0.0 and 1.0
+        """
+        # Simple string similarity for now
+        # Could be enhanced with more sophisticated algorithms
+        if not fp1 or not fp2:
+            return 0.0
             
-        # Try to find fields using common patterns
-        # Look for patterns like "Field Name: Value" throughout the document
-        key_value_patterns = [
-            r'(?im)^([A-Z][A-Za-z0-9\s\-]{2,30})\s*[:.]\s*([^\n]+)$',  # Line starting with capitalized word(s) followed by : or .
-            r'(?i)([A-Za-z][A-Za-z0-9\s\-]{2,30})\s*[:.]\s+([^\n\r]{1,100}(?:\n|\r|$))'  # More general pattern
-        ]
+        # Compare the first parts (document structure)
+        min_len = min(len(fp1), len(fp2))
+        if min_len == 0:
+            return 0.0
+            
+        matches = sum(1 for i in range(min_len) if fp1[i] == fp2[i])
+        return matches / min_len
+    
+    def train_from_example(self, doc_type, field_name, text_example, value, context_before="", context_after=""):
+        """
+        Train the model with a specific example
+        Args:
+            doc_type (str): Document type (e.g., 'coa', 'sds')
+            field_name (str): Name of the field to extract
+            text_example (str): Example text containing the value
+            value (str): The actual value to extract
+            context_before (str): Text before the value for context-aware extraction
+            context_after (str): Text after the value for context-aware extraction
+        """
+        if not doc_type or not field_name or not text_example:
+            return {"status": "error", "message": "Missing required parameters"}
+            
+        # Normalize field name
+        field_name = field_name.lower().strip()
         
-        for pattern in key_value_patterns:
-            for match in re.finditer(pattern, text):
-                key = match.group(1).strip()
-                value = match.group(2).strip()
+        # Make sure document type exists in schemas
+        if doc_type not in self.document_schemas:
+            self.document_schemas[doc_type] = {
+                'required_fields': [],
+                'auto_trained': [],
+                'field_patterns': {},
+                'sections': []
+            }
+            
+        # Add to required fields if not already there
+        if field_name not in self.document_schemas[doc_type]['required_fields']:
+            self.document_schemas[doc_type]['required_fields'].append(field_name)
+            
+        # Create a regex pattern from this example
+        pattern = self._create_extraction_pattern(text_example, value, context_before, context_after)
+        
+        # Store the training example
+        if doc_type not in self.document_examples:
+            self.document_examples[doc_type] = {}
+            
+        if field_name not in self.document_examples[doc_type]:
+            self.document_examples[doc_type][field_name] = []
+            
+        # Add fingerprint for transfer learning
+        doc_fingerprint = self._compute_document_fingerprint(text_example)
+        
+        # Store the example with pattern and fingerprint
+        self.document_examples[doc_type][field_name].append({
+            "text": text_example,
+            "value": value,
+            "pattern": pattern,
+            "context_before": context_before,
+            "context_after": context_after,
+            "fingerprint": doc_fingerprint,
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+        
+        # Store the field pattern for future extraction
+        if 'field_patterns' not in self.document_schemas[doc_type]:
+            self.document_schemas[doc_type]['field_patterns'] = {}
+            
+        # Use the new pattern or combine with existing patterns
+        if field_name in self.document_schemas[doc_type]['field_patterns']:
+            existing_pattern = self.document_schemas[doc_type]['field_patterns'][field_name]
+            # Combine patterns with OR for more robust extraction
+            combined_pattern = f"(?:{existing_pattern})|(?:{pattern})"
+            self.document_schemas[doc_type]['field_patterns'][field_name] = combined_pattern
+        else:
+            self.document_schemas[doc_type]['field_patterns'][field_name] = pattern
+            
+        # Add to training history
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "field": field_name,
+            "action": "manual_train",
+            "pattern": pattern,
+            "value": value
+        }
+        self.training_history.append(training_record)
+        
+        # Save the updated state
+        self.save_model_state()
+        
+        return {
+            "status": "success", 
+            "message": f"Field '{field_name}' trained successfully",
+            "pattern": pattern
+        }
+        
+    def _create_extraction_pattern(self, text, value, context_before="", context_after=""):
+        """
+        Create a regex pattern for extracting values based on an example
+        Uses context before and after the value for more accurate extraction
+        """
+        if not text or not value:
+            return None
+            
+        # Escape special regex characters in the value
+        escaped_value = re.escape(value)
+        
+        # Find the value in the text
+        value_pos = text.find(value)
+        if value_pos == -1:
+            # If exact value not found, try case-insensitive search
+            value_pos = text.lower().find(value.lower())
+            if value_pos == -1:
+                # If still not found, create a generic pattern
+                return r"([^\n]+)"
                 
-                # Skip if empty value or too short
-                if not value or len(value) < 2:
-                    continue
-                    
-                # Convert key to field name format (lowercase, underscores)
-                field_name = key.lower().replace(' ', '_').replace('-', '_')
+        # Get context before and after the value
+        if not context_before:
+            # Find the nearest line break or start of text
+            start_pos = text.rfind('\n', 0, value_pos)
+            if start_pos == -1:
+                start_pos = 0
+            else:
+                start_pos += 1  # Skip the newline
                 
-                # Skip common words that aren't likely to be fields
-                if field_name in ['the', 'and', 'for', 'this', 'with', 'from']:
-                    continue
-                    
-                # Skip if this field is already trained
-                if field_name in already_trained_fields:
-                    continue
-                    
-                # Skip fields we already extracted
-                if field_name in discovered_fields:
-                    continue
-                    
-                # Add to discovered fields
-                discovered_fields[field_name] = value
+            context_before = text[start_pos:value_pos]
+        
+        if not context_after:
+            # Find the nearest line break or end of text
+            end_pos = text.find('\n', value_pos + len(value))
+            if end_pos == -1:
+                end_pos = len(text)
                 
-        # Try to find fields based on common document structure patterns
-        for field_name, patterns in self.common_fields.items():
-            # Skip if we already have this field or it's already trained
-            if field_name in discovered_fields or field_name in already_trained_fields:
-                continue
-                
-            # Try each pattern for this common field
-            for pattern in patterns:
+            context_after = text[value_pos + len(value):end_pos]
+        
+        # Clean up and escape the contexts
+        context_before = context_before.strip()
+        context_after = context_after.strip()
+        
+        escaped_before = re.escape(context_before) if context_before else ""
+        escaped_after = re.escape(context_after) if context_after else ""
+        
+        # Build the pattern
+        if escaped_before and escaped_after:
+            # With both before and after context
+            pattern = f"{escaped_before}\\s*([^\\n]+?)\\s*{escaped_after}"
+        elif escaped_before:
+            # Only before context
+            pattern = f"{escaped_before}\\s*([^\\n]+)"
+        elif escaped_after:
+            # Only after context
+            pattern = f"([^\\n]+?)\\s*{escaped_after}"
+        else:
+            # Generic pattern as fallback
+            pattern = f"([^\\n]+)"
+            
+        # Make the pattern case-insensitive
+        pattern = f"(?i){pattern}"
+        
+        return pattern
+    
+    def extract_entities_with_patterns(self, text, doc_type):
+        """
+        Extract entities using trained patterns specific to the document type
+        This complements the rule-based extraction in extract_entities
+        """
+        entities = {}
+        
+        if not text or not doc_type or doc_type not in self.document_schemas:
+            return entities
+            
+        # Get the patterns for this document type
+        field_patterns = self.document_schemas[doc_type].get('field_patterns', {})
+        
+        # Extract values using each pattern
+        for field, pattern in field_patterns.items():
+            try:
                 match = re.search(pattern, text)
                 if match:
-                    value = match.group(1).strip()
-                    discovered_fields[field_name] = value
-                    break
-                    
-        # Try to detect table structures for test results or specifications
-        if 'test_results' not in discovered_fields and 'test_results' not in already_trained_fields:
-            table_detected = False
-            table_headers = [
-                r'(?i)(?:Test|Parameter|Property)\s+(?:Specification|Spec|Limit)\s+(?:Result|Value|Reading)',
-                r'(?i)(?:Attribute|Characteristic)\s+(?:Specification|Requirement)\s+(?:Result|Observation)',
-                r'(?i)(?:Parameter|Test)\s+(?:Method|Standard)\s+(?:Unit)\s+(?:Specification)\s+(?:Result)'
-            ]
+                    entities[field] = match.group(1).strip()
+            except Exception as e:
+                logging.error(f"Error extracting {field} with pattern {pattern}: {e}")
+                
+        return entities
+    
+    def process_document(self, text):
+        """
+        Process document text and extract structured information
+        Enhanced with auto-training and transfer learning
+        """
+        if not text:
+            return {
+                "document_type": "unknown",
+                "confidence": 0.0,
+                "entities": {},
+                "sections": {},
+                "full_text": ""
+            }
             
-            for header_pattern in table_headers:
-                if re.search(header_pattern, text):
-                    table_detected = True
-                    break
-                    
-            if table_detected:
-                test_results = self._extract_test_results(text)
-                if test_results:
-                    discovered_fields['test_results'] = test_results
+        # First, classify the document
+        doc_type, confidence = self.classify_document(text)
         
-        return discovered_fields
+        # Extract document sections
+        sections = self.extract_sections(text, doc_type)
+        
+        # First pass: extract entities with rule-based methods
+        entities = self.extract_entities(text, doc_type)
+        
+        # Second pass: use trained patterns
+        pattern_entities = self.extract_entities_with_patterns(text, doc_type)
+        
+        # Merge, giving preference to rule-based extraction
+        for field, value in pattern_entities.items():
+            if field not in entities:
+                entities[field] = value
+                
+        # Auto-train if confidence is high
+        if confidence > 0.7 and doc_type != "unknown":
+            self.auto_train_all_fields(text, doc_type)
+            
+        # Return the combined results
+        result = {
+            "document_type": doc_type,
+            "confidence": confidence,
+            "entities": entities,
+            "sections": sections,
+            "full_text": text
+        }
+        
+        return result

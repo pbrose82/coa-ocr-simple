@@ -4,7 +4,6 @@
 # 1. Semi-automated field detection - scans documents for potential field-value pairs
 # 2. Fully automated field inference - automatically identifies key-value pairs and field patterns
 # 3. Transfer learning - applies knowledge from similar documents
-# 4. Specialized COA document processing - formats Certificate of Analysis documents clearly
 #
 # Features:
 # - Automatic field discovery and training
@@ -12,7 +11,6 @@
 # - Document similarity detection
 # - Persistent field patterns storage
 # - Dynamic field extraction for any trained field
-# - Clean formatting for COA documents
 
 import re
 import os
@@ -523,7 +521,7 @@ class AIDocumentProcessor:
                                 entities[field] = field_match.group(1).strip()
                         else:
                             # Use default pattern
-                            field_pattern = r'(?i)' + field.replace('_', '\\s+') + r'\s*[:.]\s*([^\n]+)'
+                            field_pattern = r'(?i)' + field.replace('_', '\s+') + r'\s*[:.]\s*([^\n]+)'
                             field_match = re.search(field_pattern, text)
                             if field_match:
                                 entities[field] = field_match.group(1).strip()
@@ -531,7 +529,7 @@ class AIDocumentProcessor:
             # Extract test results
             test_results = self._extract_test_results(text)
             if test_results:
-                entities.update(test_results)
+                entities['test_results'] = test_results
                 
         # Run dynamic discovery for auto-training on any document type
         if hasattr(self, 'auto_trained_fields'):
@@ -658,205 +656,6 @@ class AIDocumentProcessor:
         
         return test_results
     
-    def _extract_coa_results(self, text):
-        """
-        Extract test results from COA documents with better formatting
-        Returns a structured dictionary of test specifications and results
-        """
-        test_results = {}
-        
-        # Look for table structure in the document
-        table_pattern = r'(?i)(?:Test|Parameter)(?:\s+Specification)?(?:\s+Result)?'
-        table_match = re.search(table_pattern, text)
-        
-        if table_match:
-            # Find the start of the test results section
-            section_start = text.find("Test Specification Result")
-            if section_start == -1:
-                section_start = text.find("Test", table_match.start())
-            
-            # Find the end of the test results section
-            end_markers = [
-                "Recommended Retest Period",
-                "Quality Control",
-                "Sigma-Aldrich warrants",
-                "________"
-            ]
-            
-            section_end = len(text)
-            for marker in end_markers:
-                marker_pos = text.find(marker, section_start)
-                if marker_pos != -1 and marker_pos < section_end:
-                    section_end = marker_pos
-            
-            # Extract the test results section
-            test_section = text[section_start:section_end]
-            
-            # Split into lines
-            lines = test_section.split('\n')
-            current_test = None
-            
-            # Process each line
-            for line in lines:
-                # Skip header or empty lines
-                if not line.strip() or "Test Specification Result" in line or "_____" in line:
-                    continue
-                
-                # Check if this line starts a new test
-                test_match = re.match(r'^([A-Za-z][\w\s]+\(?[\w]*\)?)\s+(<[^<]+>|[\d\.\-\s]+%|\w+)\s+([^<]+)$', line.strip())
-                if not test_match:
-                    test_match = re.match(r'^([A-Za-z][\w\s]+\(?[\w]*\)?)\s+(<.+)$', line.strip())
-                
-                if test_match:
-                    # New test with specification and result on same line
-                    test_name = test_match.group(1).strip()
-                    current_test = test_name
-                    
-                    if len(test_match.groups()) >= 3:
-                        specification = test_match.group(2).strip()
-                        result = test_match.group(3).strip()
-                        test_results[test_name] = {
-                            "specification": specification,
-                            "result": result
-                        }
-                    elif len(test_match.groups()) == 2:
-                        specification = test_match.group(2).strip()
-                        # Look in the next part of the text for the result
-                        result_match = re.search(rf"{re.escape(specification)}\s+([^_\n]+)", text[section_start:])
-                        result = result_match.group(1).strip() if result_match else ""
-                        test_results[test_name] = {
-                            "specification": specification,
-                            "result": result
-                        }
-                elif current_test and line.strip():
-                    # This might be a continuation of the previous test or a result
-                    if ":" not in line and re.search(r'^\s+', line):
-                        # This is a continuation of the previous test description
-                        if current_test in test_results:
-                            test_results[current_test]["description"] = test_results[current_test].get("description", "") + " " + line.strip()
-    
-        return test_results
-
-    def format_coa_output(self, entities):
-        """
-        Format COA output to be more readable and structured
-        """
-        if not entities:
-            return "No information extracted"
-        
-        # Organize the data
-        product_info = {}
-        test_results = {}
-        
-        # Categorize fields
-        for key, value in entities.items():
-            if isinstance(value, dict) and "specification" in value:
-                test_results[key] = value
-            else:
-                product_info[key] = value
-        
-        # Format product information
-        formatted_output = "## Product Information\n\n"
-        
-        # Define the order of fields to display
-        field_order = [
-            "product_name", "cas_number", "product_number", "batch_number", 
-            "brand", "mdl_number", "quality_release_date", "recommended_retest_date"
-        ]
-        
-        # Add fields in specified order
-        for field in field_order:
-            if field in product_info:
-                formatted_output += f"**{field.replace('_', ' ').title()}:** {product_info[field]}\n"
-        
-        # Add any other fields not in the predefined order
-        for field, value in product_info.items():
-            if field not in field_order and field != "test_results":
-                formatted_output += f"**{field.replace('_', ' ').title()}:** {value}\n"
-        
-        # Add test results
-        if test_results:
-            formatted_output += "\n## Test Results\n\n"
-            formatted_output += "| Test | Specification | Result |\n"
-            formatted_output += "|-----|---------------|--------|\n"
-            
-            for test, data in test_results.items():
-                spec = data.get("specification", "")
-                result = data.get("result", "")
-                formatted_output += f"| {test} | {spec} | {result} |\n"
-        
-        return formatted_output
-
-    def process_coa_document(self, text):
-        """
-        Special processing for Certificate of Analysis documents
-        """
-        # First, identify the document type
-        doc_type, confidence = self.classify_document(text)
-        
-        # If it's a COA document with high confidence, use specialized extraction
-        if doc_type == "coa" and confidence > 0.7:
-            # Extract basic metadata
-            entities = {}
-            
-            # Product name
-            product_name = re.search(r'Product\s+Name:?\s*([^\n]+)', text)
-            if product_name:
-                entities['product_name'] = product_name.group(1).strip()
-            
-            # Product number
-            product_number = re.search(r'Product\s+Number:?\s*([A-Z0-9]+)', text)
-            if product_number:
-                entities['product_number'] = product_number.group(1).strip()
-            
-            # Batch number
-            batch_number = re.search(r'Batch\s+Number:?\s*([A-Z0-9]+)', text)
-            if batch_number:
-                entities['batch_number'] = batch_number.group(1).strip()
-            
-            # Brand
-            brand = re.search(r'Brand:?\s*([A-Z0-9]+)', text)
-            if brand:
-                entities['brand'] = brand.group(1).strip()
-            
-            # CAS number
-            cas_number = re.search(r'CAS\s+Number:?\s*([0-9\-]+)', text)
-            if cas_number:
-                entities['cas_number'] = cas_number.group(1).strip()
-            
-            # MDL number
-            mdl_number = re.search(r'MDL\s+Number:?\s*([A-Z0-9]+)', text)
-            if mdl_number:
-                entities['mdl_number'] = mdl_number.group(1).strip()
-            
-            # Quality release date
-            release_date = re.search(r'Quality\s+Release\s+Date:?\s*([^\n]+)', text)
-            if release_date:
-                entities['quality_release_date'] = release_date.group(1).strip()
-            
-            # Recommended retest date
-            retest_date = re.search(r'Recommended\s+Retest\s+Date:?\s*([^\n]+)', text)
-            if retest_date:
-                entities['recommended_retest_date'] = retest_date.group(1).strip()
-            
-            # Get test results with the specialized method
-            test_results = self._extract_coa_results(text)
-            if test_results:
-                entities.update(test_results)
-            
-            # Format the output
-            formatted_output = self.format_coa_output(entities)
-            
-            return {
-                "document_type": "Certificate of Analysis",
-                "confidence": confidence,
-                "entities": entities,
-                "formatted_output": formatted_output
-            }
-        
-        # Otherwise, use the standard processing
-        return self.process_document(text)
-    
     def _create_context_pattern(self, text, field_name, value):
         """Create a context-aware pattern for a field based on its value and surroundings"""
         if not text or not value:
@@ -869,9 +668,7 @@ class AIDocumentProcessor:
             value_pos = text.lower().find(value.lower())
             if value_pos == -1:
                 # Could not find the value, create a generic pattern
-                replacement = '\\s+'
-                pattern = "(?i)" + field_name.replace('_', replacement) + "\\s*[:.=]\\s*([^\\n]+)"
-                return pattern
+                return r'(?i)' + field_name.replace('_', '\s+') + r'\s*[:.]\s*([^\n]+)'
         
         # Get context before the value (look for field name or nearby text)
         context_start = max(0, value_pos - 100)
@@ -893,6 +690,9 @@ class AIDocumentProcessor:
                 if context_before.endswith(sep):
                     pattern_parts.append(re.escape(context_before[-20:].strip()))
                     break
+        
+        # Escape the value for regex
+        escaped_value = re.escape(value)
         
         # Build the pattern
         if pattern_parts:
@@ -1340,7 +1140,7 @@ class AIDocumentProcessor:
             value_pos = text.lower().find(value.lower())
             if value_pos == -1:
                 # If still not found, create a generic pattern
-                return "([^\\n]+)"
+                return r"([^\n]+)"
                 
         # Get context before and after the value
         if not context_before:
@@ -1428,10 +1228,6 @@ class AIDocumentProcessor:
         # First, classify the document
         doc_type, confidence = self.classify_document(text)
         
-        # For COA documents, use specialized processing
-        if doc_type == "coa" and confidence > 0.7:
-            return self.process_coa_document(text)
-            
         # Extract document sections
         sections = self.extract_sections(text, doc_type)
         

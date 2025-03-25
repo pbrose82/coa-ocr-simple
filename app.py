@@ -22,7 +22,7 @@ from pdf2image import convert_from_path
 
 # Import AI Document Processor with error handling
 try:
-    from ai_document_processor import EnhancedAIDocumentProcessor
+    from ai_document_processor import AIDocumentProcessor
     ai_available = True
 except ImportError:
     ai_available = False
@@ -62,7 +62,7 @@ token_cache = {}
 ai_processor = None
 if ai_available:
     try:
-        ai_processor = EnhancedAIDocumentProcessor()
+        ai_processor = AIDocumentProcessor()
         logging.info("Enhanced AI Document Processor initialized successfully")
     except Exception as e:
         logging.error(f"Error initializing Enhanced AI Document Processor: {e}")

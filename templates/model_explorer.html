@@ -579,3 +579,185 @@ function fetchModelData(forceRefresh = false) {
     </script>
 </body>
 </html>
+// Add this to the end of the script section in model_explorer.html
+// This enables editing existing field patterns
+
+function showFieldExample(modelCard, docType, fieldName) {
+    // Show the field examples panel
+    const examplesPanel = modelCard.querySelector('.field-examples');
+    examplesPanel.style.display = 'block';
+    
+    // Set field name
+    modelCard.querySelector('.example-field-name').textContent = fieldName;
+    
+    // Fetch examples
+    fetch('/api/model-data')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const examples = data.extraction_examples[docType];
+                
+                if (examples && examples.examples[fieldName]) {
+                    const example = examples.examples[fieldName];
+                    
+                    // Set pattern
+                    const patternElement = modelCard.querySelector('.pattern-text');
+                    patternElement.textContent = example.pattern;
+                    
+                    // Add edit button next to pattern if not already there
+                    if (!modelCard.querySelector('.edit-pattern-btn')) {
+                        const editBtn = document.createElement('button');
+                        editBtn.className = 'btn btn-sm btn-outline-primary mt-2 edit-pattern-btn';
+                        editBtn.innerHTML = '<i class="fas fa-edit me-1"></i> Edit Pattern';
+                        editBtn.onclick = function() {
+                            showPatternEditor(docType, fieldName, example.pattern);
+                        };
+                        patternElement.parentNode.appendChild(editBtn);
+                    }
+                    
+                    // Set example
+                    modelCard.querySelector('.example-text').textContent = example.example;
+                } else {
+                    // No example available
+                    modelCard.querySelector('.pattern-text').textContent = 'Custom extraction logic';
+                    modelCard.querySelector('.example-text').textContent = 'No specific example available';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching example data:', error);
+        });
+}
+
+function showPatternEditor(docType, fieldName, currentPattern) {
+    // Create modal for editing
+    let modalElement = document.getElementById('patternEditorModal');
+    
+    if (!modalElement) {
+        modalElement = document.createElement('div');
+        modalElement.className = 'modal fade';
+        modalElement.id = 'patternEditorModal';
+        modalElement.setAttribute('tabindex', '-1');
+        
+        modalElement.innerHTML = `
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Extraction Pattern</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="docTypeInput" class="form-label">Document Type</label>
+                            <input type="text" class="form-control" id="docTypeInput" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="fieldNameInput" class="form-label">Field Name</label>
+                            <input type="text" class="form-control" id="fieldNameInput" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="patternInput" class="form-label">Extraction Pattern</label>
+                            <textarea class="form-control" id="patternInput" rows="4"></textarea>
+                            <small class="text-muted">Use valid regex pattern. Example: (?i)Product\\s+Name\\s*[:.=]\\s*([^\\n]+)</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="savePatternBtn">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modalElement);
+    }
+    
+    // Fill in the form
+    document.getElementById('docTypeInput').value = docType;
+    document.getElementById('fieldNameInput').value = fieldName;
+    document.getElementById('patternInput').value = currentPattern;
+    
+    // Initialize and show the modal
+    const modal = new bootstrap.Modal(modalElement);
+    modal.show();
+    
+    // Handle save button
+    document.getElementById('savePatternBtn').onclick = function() {
+        const newPattern = document.getElementById('patternInput').value;
+        savePattern(docType, fieldName, newPattern, modal);
+    };
+}
+
+function savePattern(docType, fieldName, pattern, modal) {
+    // Create a loading indicator
+    const saveBtn = document.getElementById('savePatternBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Saving...';
+    saveBtn.disabled = true;
+    
+    // Send the update to the server
+    fetch('/api/update-pattern', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            doc_type: docType,
+            field: fieldName,
+            pattern: pattern
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Hide the modal
+        modal.hide();
+        
+        if (data.status === 'success') {
+            // Show success message
+            showNotification('Pattern updated successfully!', 'success');
+            
+            // Refresh the data (force cache refresh)
+            fetchModelData(true);
+        } else {
+            showNotification(`Error: ${data.message}`, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating pattern:', error);
+        showNotification('Error updating pattern', 'error');
+    })
+    .finally(() => {
+        // Reset the button
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    });
+}
+
+function showNotification(message, type) {
+    // Create notification element if it doesn't exist
+    let notification = document.getElementById('notification');
+    if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'notification';
+        notification.className = `alert alert-${type} position-fixed p-3`;
+        notification.style.top = '20px';
+        notification.style.right = '20px';
+        notification.style.zIndex = '9999';
+        notification.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
+        notification.style.maxWidth = '400px';
+        document.body.appendChild(notification);
+    } else {
+        notification.className = `alert alert-${type} position-fixed p-3`;
+    }
+    
+    // Set message content
+    notification.innerHTML = message;
+    
+    // Show the notification
+    notification.style.display = 'block';
+    
+    // Hide after 3 seconds
+    setTimeout(() => {
+        notification.style.display = 'none';
+    }, 3000);
+}

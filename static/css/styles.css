@@ -367,6 +367,34 @@ body {
     background-color: var(--alchemy-blue);
 }
 
+/* Visual training styles */
+.document-preview {
+    position: relative;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.document-content {
+    white-space: pre-wrap;
+    font-family: monospace;
+    padding: 20px;
+    min-height: 500px;
+    max-height: 700px;
+    overflow-y: auto;
+}
+
+/* Template management styles */
+.template-card {
+    transition: all 0.2s ease;
+    height: 100%;
+}
+
+.template-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+}
+
 /* Results display */
 .result-box {
     background-color: white;

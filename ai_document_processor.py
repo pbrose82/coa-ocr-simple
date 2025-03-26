@@ -480,16 +480,19 @@ class AIDocumentProcessor:
                     break
             
             # Density extraction
+            # Find the density patterns in ai_document_processor.py
             density_patterns = [
-                r'(?i)Density\s+@\s+20[^\s]*\s+ASTM\s+D\s+1298\s+g/ml\s+(\d+\.\d+)',
-                r'(?i)Density[:.]\s*(\d+\.\d+)'
+                r'(?i)Density\s+@\s+20[^\s]*\s+ASTM\s+D\s+1298\s+g/ml\s+\d+\.\d+\s+(\d+\.\d+)',  # This captures only the result
+                r'(?i)Density[:.]\s*(\d+\.\d+)'  # This pattern remains the same for other formats
             ]
-            
+
+            # Instead of concatenating all matches:
             for pattern in density_patterns:
                 density_match = re.search(pattern, text)
                 if density_match:
-                    entities['density'] = density_match.group(1).strip()
-                    break
+                entities['density'] = density_match.group(1).strip()
+                    break  # Add this to stop after the first match
+            
             
             # Purity extraction with improved patterns
             purity_patterns = [

@@ -9,6 +9,10 @@ import secrets
 import uuid
 import re
 from datetime import datetime, timedelta
+import types
+import pickle
+from collections import defaultdict
+from pathlib import Path
 
 # Third-party imports
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -20,16 +24,42 @@ import pytesseract
 import PyPDF2
 from pdf2image import convert_from_path
 
+# Configure logging - enhanced for debugging
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Model persistence configuration
+MODEL_STATE_DIR = os.environ.get('MODEL_STATE_DIR', '/app/models')
+logging.info(f"Using model storage directory: {MODEL_STATE_DIR}")
+
+# Ensure the directory exists
+try:
+    os.makedirs(MODEL_STATE_DIR, exist_ok=True)
+    logging.info(f"Ensured model directory exists: {MODEL_STATE_DIR}")
+except Exception as e:
+    logging.error(f"Failed to create model directory: {e}")
+
+# Verify directory permissions
+logging.info(f"Model directory exists: {os.path.exists(MODEL_STATE_DIR)}")
+logging.info(f"Model directory is writable: {os.access(MODEL_STATE_DIR, os.W_OK)}")
+
+# Log directory contents for debugging
+try:
+    if os.path.exists(MODEL_STATE_DIR):
+        files = os.listdir(MODEL_STATE_DIR)
+        logging.info(f"Files in model directory: {files}")
+except Exception as e:
+    logging.error(f"Error listing directory contents: {e}")
+
 # Import AI Document Processor with error handling
 try:
     from ai_document_processor import AIDocumentProcessor
     ai_available = True
-except ImportError:
+    logging.info("Successfully imported AI Document Processor")
+except ImportError as e:
     ai_available = False
-    logging.warning("AI document processor not available, falling back to legacy parser")
-
-# Logging Configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.warning(f"AI document processor not available: {e}")
+    logging.warning("Falling back to legacy parser")
 
 # Flask Application Setup
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -67,6 +97,65 @@ if ai_available:
     except Exception as e:
         logging.error(f"Error initializing Enhanced AI Document Processor: {e}")
 
+# Define the tenant-aware save_model_state method
+def save_model_state(self):
+    """Save model state with tenant-specific path"""
+    try:
+        # Check if we have a tenant ID
+        tenant_id = getattr(self, 'tenant_id', 'default')
+        
+        # Use the configured model directory
+        model_dir = MODEL_STATE_DIR
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = os.path.join(model_dir, f"{tenant_id}_model_state.pkl")
+        
+        with open(model_path, "wb") as f:
+            pickle.dump({
+                "document_schemas": self.document_schemas,
+                "training_history": self.training_history,
+                "document_examples": self.document_examples,
+                "field_patterns": self.field_patterns,
+                "auto_trained_fields": self.auto_trained_fields
+            }, f)
+        logging.info(f"Model state saved for tenant {tenant_id} at {model_path}")
+        return "Model state saved"
+    except Exception as e:
+        logging.error(f"Error saving model state: {e}")
+        return f"Error saving model state: {e}"
+
+# Apply the monkey patch
+if ai_processor:
+    ai_processor.save_model_state = types.MethodType(save_model_state, ai_processor)
+    
+    # Also add a tenant-aware load_model_state method
+    def load_model_state(self):
+        """Load model state from tenant-specific path"""
+        try:
+            # Check if we have a tenant ID
+            tenant_id = getattr(self, 'tenant_id', 'default')
+            
+            model_dir = MODEL_STATE_DIR
+            model_path = os.path.join(model_dir, f"{tenant_id}_model_state.pkl")
+            
+            logging.info(f"Attempting to load model state from: {model_path}")
+            
+            if os.path.exists(model_path):
+                with open(model_path, "rb") as f:
+                    state = pickle.load(f)
+                    self.document_schemas = state.get("document_schemas", {})
+                    self.training_history = state.get("training_history", [])
+                    self.document_examples = state.get("document_examples", {})
+                    self.field_patterns = state.get("field_patterns", {})
+                    self.auto_trained_fields = state.get("auto_trained_fields", defaultdict(set))
+                logging.info(f"Model state loaded for tenant {tenant_id}")
+            else:
+                logging.info(f"No saved model state found for tenant {tenant_id}")
+        except Exception as e:
+            logging.error(f"Error loading model state for tenant {tenant_id}: {e}")
+            
+    # Apply the second monkey patch
+    ai_processor.load_model_state = types.MethodType(load_model_state, ai_processor)
+    
 # Configuration Management Functions
 def ensure_config_directory():
     """Ensure the configuration directory exists"""
@@ -165,7 +254,52 @@ def save_config(config):
     except Exception as e:
         logging.error(f"Unexpected error saving configuration: {str(e)}")
         return False
+        
+# Dictionary to store tenant-specific AI processors
+tenant_processors = {}
 
+def get_tenant_processor(tenant_id):
+    """Get or create an AI processor for a specific tenant"""
+    global tenant_processors
+    
+    if tenant_id not in tenant_processors:
+        try:
+            processor = AIDocumentProcessor()
+            processor.tenant_id = tenant_id  # Add tenant ID to processor
+            
+            # Load tenant-specific model if it exists
+            model_path = os.path.join(MODEL_STATE_DIR, f"{tenant_id}_model_state.pkl")
+            
+            logging.info(f"Looking for tenant model at: {model_path}")
+            
+            if os.path.exists(model_path):
+                try:
+                    with open(model_path, "rb") as f:
+                        state = pickle.load(f)
+                        processor.document_schemas = state.get("document_schemas", {})
+                        processor.training_history = state.get("training_history", [])
+                        processor.document_examples = state.get("document_examples", {})
+                        processor.field_patterns = state.get("field_patterns", {})
+                        processor.auto_trained_fields = state.get("auto_trained_fields", defaultdict(set))
+                    logging.info(f"Model state loaded for tenant {tenant_id}")
+                except Exception as e:
+                    logging.error(f"Error loading model state: {e}")
+            else:
+                logging.info(f"No saved model state found for tenant {tenant_id}")
+            
+            # Apply the monkey patch for saving models
+            processor.save_model_state = types.MethodType(save_model_state, processor)
+            processor.load_model_state = types.MethodType(load_model_state, processor)
+            
+            tenant_processors[tenant_id] = processor
+            logging.info(f"Created AI processor for tenant {tenant_id}")
+        except Exception as e:
+            logging.error(f"Error creating AI processor for tenant {tenant_id}: {e}")
+            # Fall back to default processor
+            tenant_processors[tenant_id] = ai_processor
+    
+    return tenant_processors[tenant_id]
+    
 def get_tenant_config(tenant_id):
     """Get tenant configuration from config file"""
     if tenant_id not in CONFIG["tenants"]:
@@ -374,12 +508,32 @@ def process_tenant(tenant):
 @app.route('/healthz')
 def health():
     """Health check endpoint"""
-    return "ok"
+    # Enhanced health check that also checks model storage
+    model_dir_exists = os.path.exists(MODEL_STATE_DIR)
+    model_dir_writable = os.access(MODEL_STATE_DIR, os.W_OK) if model_dir_exists else False
+    
+    health_status = {
+        "status": "ok",
+        "model_storage": {
+            "directory": MODEL_STATE_DIR,
+            "exists": model_dir_exists,
+            "writable": model_dir_writable
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    return jsonify(health_status)
 
 @app.route('/training')
 def training():
-    """Route for the training page"""
-    return render_template('training.html')
+    """Route for the training page with tenant information"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    return render_template('training.html', 
+                          tenant=current_tenant, 
+                          tenant_name=tenant_config['display_name'])
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
@@ -390,22 +544,41 @@ def serve_static(filename):
 @app.route('/model-info')
 def model_info():
     """View information about the AI model for debugging"""
-    if not ai_processor:
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
         # Get model information
-        document_schemas = ai_processor.get_document_schemas()
-        training_history = ai_processor.get_training_history()
+        document_schemas = tenant_processor.get_document_schemas()
+        training_history = tenant_processor.get_training_history()
+        
+        # Check for model files in the directory
+        model_files = []
+        try:
+            if os.path.exists(MODEL_STATE_DIR):
+                model_files = [f for f in os.listdir(MODEL_STATE_DIR) if f.endswith('.pkl')]
+        except Exception as e:
+            logging.error(f"Error listing model files: {e}")
         
         # Export the model configuration
-        export_result = ai_processor.export_model_config('model_config.json')
+        export_result = tenant_processor.export_model_config('model_config.json')
         
         return jsonify({
             "status": "success", 
             "document_schemas": document_schemas,
             "training_history": training_history,
-            "export_result": export_result
+            "export_result": export_result,
+            "storage_info": {
+                "model_directory": MODEL_STATE_DIR,
+                "model_files": model_files,
+                "directory_exists": os.path.exists(MODEL_STATE_DIR),
+                "directory_writable": os.access(MODEL_STATE_DIR, os.W_OK)
+            },
+            "tenant": current_tenant
         })
     except Exception as e:
         logging.error(f"Error getting model info: {e}")
@@ -413,31 +586,43 @@ def model_info():
 
 @app.route('/model-explorer')
 def model_explorer():
-    """Display the AI model explorer page"""
-    return render_template('model_explorer.html')
+    """Display the AI model explorer page with tenant information"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    return render_template('model_explorer.html',
+                          tenant=current_tenant,
+                          tenant_name=tenant_config['display_name'])
 
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""
-    if not ai_processor:
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
         # Force reload the model state from disk to get latest changes
         try:
-            if hasattr(ai_processor, 'load_model_state'):
-                ai_processor.load_model_state()
-                logging.info("Reloaded model state from disk")
+            if hasattr(tenant_processor, 'load_model_state'):
+                tenant_processor.load_model_state()
+                logging.info(f"Reloaded model state from disk for tenant {current_tenant}")
         except Exception as e:
             logging.warning(f"Unable to reload model state: {e}")
         
         # Get model information - handle missing methods
         document_schemas = {}
         try:
-            if hasattr(ai_processor, 'get_document_schemas'):
-                document_schemas = ai_processor.get_document_schemas()
-            elif hasattr(ai_processor, 'document_schemas'):
-                document_schemas = ai_processor.document_schemas
+            if hasattr(tenant_processor, 'get_document_schemas'):
+                document_schemas = tenant_processor.get_document_schemas()
+            elif hasattr(tenant_processor, 'document_schemas'):
+                document_schemas = tenant_processor.document_schemas
         except Exception as e:
             logging.error(f"Error getting document schemas: {e}")
             document_schemas = {
@@ -449,10 +634,10 @@ def get_model_data():
         # Try to get training history, but handle case where method doesn't exist
         training_history = []
         try:
-            if hasattr(ai_processor, 'get_training_history'):
-                training_history = ai_processor.get_training_history()
-            elif hasattr(ai_processor, 'training_history'):
-                training_history = ai_processor.training_history
+            if hasattr(tenant_processor, 'get_training_history'):
+                training_history = tenant_processor.get_training_history()
+            elif hasattr(tenant_processor, 'training_history'):
+                training_history = tenant_processor.training_history
         except Exception as e:
             logging.warning(f"Unable to get training history: {e}")
         
@@ -488,7 +673,13 @@ def get_model_data():
             "training_history": history_by_type,
             "field_counts": field_counts,
             "extraction_examples": extraction_examples,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # Add timestamp for debugging
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # Add timestamp for debugging
+            "tenant": current_tenant,
+            "storage_info": {
+                "model_directory": MODEL_STATE_DIR,
+                "directory_exists": os.path.exists(MODEL_STATE_DIR),
+                "directory_writable": os.access(MODEL_STATE_DIR, os.W_OK)
+            }
         })
     except Exception as e:
         logging.error(f"Error getting model data: {e}")
@@ -546,12 +737,14 @@ def get_extraction_examples(doc_type):
     
     return examples
 
-# Route for File Extraction
 @app.route('/extract', methods=['POST'])
 def extract():
     # Get current tenant from session or use default
     current_tenant = session.get('tenant', DEFAULT_TENANT)
     tenant_config = get_tenant_config(current_tenant)
+    
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
     
     # Check if the post request has the file part
     if 'file' not in request.files:
@@ -624,15 +817,13 @@ def extract():
             except Exception as e:
                 logging.warning(f"Failed to remove temp file: {e}")
             
-            # Use AI-based processing if available
-            if ai_processor is not None:
-                logging.info("Using AI Document Processor for enhanced extraction")
-                ai_start = time.time()
-                
+            # Use tenant_processor instead of ai_processor when processing documents
+            if tenant_processor is not None:
+                logging.info(f"Using tenant-specific AI processor for tenant {current_tenant}")
                 try:
-                    # Process with AI
-                    ai_result = ai_processor.process_document(text)
-                    logging.info(f"AI processing completed in {time.time() - ai_start:.2f} seconds")
+                    # Process with tenant-specific AI
+                    ai_result = tenant_processor.process_document(text)
+                    logging.info(f"AI processing completed for tenant {current_tenant}")
                     
                     # Convert AI result to format compatible with existing UI
                     data = adapt_ai_result_to_legacy_format(ai_result)
@@ -688,10 +879,98 @@ def extract():
     
     return jsonify({"error": "File type not allowed"}), 400
 
-# Route for Training the AI
+
+@app.route('/api/update-pattern', methods=['POST'])
+def update_pattern():
+    """API endpoint to update extraction patterns for fields with tenant-specific processor"""
+    # SECTION 1: GET THE TENANT-SPECIFIC PROCESSOR
+    # ------------------------------------------
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    # SECTION 2: VALIDATE THE REQUEST DATA
+    # -----------------------------------
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+        
+    doc_type = data.get('doc_type')
+    field = data.get('field')
+    pattern = data.get('pattern')
+    
+    if not doc_type or not field or not pattern:
+        return jsonify({
+            "status": "error", 
+            "message": "Missing required fields (doc_type, field, pattern)"
+        }), 400
+    
+    # SECTION 3: UPDATE THE PATTERN IN THE MODEL
+    # ----------------------------------------
+    try:
+        # Check if the document type exists in field patterns
+        if not hasattr(tenant_processor, 'field_patterns'):
+            return jsonify({
+                "status": "error", 
+                "message": "Field patterns not available in AI processor"
+            }), 500
+            
+        if doc_type not in tenant_processor.field_patterns:
+            # Initialize this document type if it doesn't exist
+            tenant_processor.field_patterns[doc_type] = {}
+        
+        # Update the pattern
+        tenant_processor.field_patterns[doc_type][field] = pattern
+        
+        # Save the model state
+        tenant_processor.save_model_state()
+        
+        # Log the update
+        logging.info(f"Updated pattern for {doc_type}/{field} in tenant {current_tenant}")
+        
+        # SECTION 4: RECORD THE CHANGE IN TRAINING HISTORY
+        # ----------------------------------------------
+        # Add to training history
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "field": field,
+            "action": "update_pattern",
+            "pattern": pattern,
+            "tenant": current_tenant
+        }
+        
+        if hasattr(tenant_processor, 'training_history'):
+            tenant_processor.training_history.append(training_record)
+        
+        # SECTION 5: RETURN SUCCESS RESPONSE
+        # ---------------------------------
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully updated pattern for {field} in {doc_type}"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating pattern: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"Error updating pattern: {str(e)}"
+        }), 500
+
 @app.route('/train', methods=['POST'])
 def train():
-    if not ai_processor:
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
         
     if 'file' not in request.files:
@@ -739,8 +1018,12 @@ def train():
             except:
                 pass
                 
-            # Train AI processor with extracted text
-            result = ai_processor.train_from_example(text, doc_type, annotations)
+            # Train tenant-specific processor with extracted text
+            result = tenant_processor.train_from_example(text, doc_type, annotations)
+            
+            # Save the model state
+            tenant_processor.save_model_state()
+            
             return jsonify(result)
             
         except Exception as e:
@@ -753,7 +1036,7 @@ def train():
                     pass
             return jsonify({"status": "error", "message": str(e)}), 500
             
-    return jsonify({"status": "error", "message": "File type not allowed"}), 400
+    return jsonify({"status": "error", "message": "File type not allowed"}), 400     
 
 # Admin Routes
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -1285,6 +1568,88 @@ def parse_coa_data(text):
             data["density"] = density_match.group(1).strip()
     
     return data
+
+# Verifying model persistence
+@app.route('/api/verify-persistence', methods=['GET'])
+def verify_persistence():
+    """Verify that model persistence is working correctly"""
+    try:
+        model_dir = MODEL_STATE_DIR
+        test_file = os.path.join(model_dir, 'persistence_test.pkl')
+        test_data = {"test": True, "timestamp": datetime.now().isoformat()}
+        
+        # Test directory permissions
+        dir_exists = os.path.exists(model_dir)
+        dir_writable = os.access(model_dir, os.W_OK) if dir_exists else False
+        
+        # Create directory if it doesn't exist
+        if not dir_exists:
+            try:
+                os.makedirs(model_dir, exist_ok=True)
+                dir_exists = os.path.exists(model_dir)
+                dir_writable = os.access(model_dir, os.W_OK)
+            except Exception as e:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Failed to create model directory: {e}",
+                    "step": "directory_creation"
+                }), 500
+        
+        # Check if we can write to the directory
+        if not dir_writable:
+            return jsonify({
+                "status": "error",
+                "message": "Model directory exists but is not writable",
+                "step": "permission_check",
+                "dir": model_dir
+            }), 500
+        
+        # Try to write a test file
+        try:
+            with open(test_file, 'wb') as f:
+                pickle.dump(test_data, f)
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to write test file: {e}",
+                "step": "write_test"
+            }), 500
+        
+        # Try to read the test file
+        try:
+            with open(test_file, 'rb') as f:
+                loaded_data = pickle.load(f)
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to read test file: {e}",
+                "step": "read_test"
+            }), 500
+        
+        # List all model files
+        try:
+            model_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
+        except Exception as e:
+            model_files = [f"Error listing files: {e}"]
+        
+        # Return success
+        return jsonify({
+            "status": "success",
+            "message": "Model persistence is working correctly",
+            "test_data": loaded_data,
+            "directory": {
+                "path": model_dir,
+                "exists": dir_exists,
+                "writable": dir_writable
+            },
+            "model_files": model_files
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Verification failed: {e}",
+            "step": "general"
+        }), 500
 
 # Main Application Runner
 if __name__ == '__main__':

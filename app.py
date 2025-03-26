@@ -525,9 +525,6 @@ def model_explorer():
     return render_template('model_explorer.html',
                           tenant=current_tenant,
                           tenant_name=tenant_config['display_name'])
-
-
-
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""
@@ -537,25 +534,25 @@ def get_model_data():
     # Get tenant-specific processor
     tenant_processor = get_tenant_processor(current_tenant)
     
-    if not tenant_processor:  # Changed from ai_processor to tenant_processor
+    if not tenant_processor:
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
         # Force reload the model state from disk to get latest changes
         try:
-            if hasattr(ai_processor, 'load_model_state'):
-                ai_processor.load_model_state()
-                logging.info("Reloaded model state from disk")
+            if hasattr(tenant_processor, 'load_model_state'):
+                tenant_processor.load_model_state()
+                logging.info(f"Reloaded model state from disk for tenant {current_tenant}")
         except Exception as e:
             logging.warning(f"Unable to reload model state: {e}")
         
         # Get model information - handle missing methods
         document_schemas = {}
         try:
-            if hasattr(ai_processor, 'get_document_schemas'):
-                document_schemas = ai_processor.get_document_schemas()
-            elif hasattr(ai_processor, 'document_schemas'):
-                document_schemas = ai_processor.document_schemas
+            if hasattr(tenant_processor, 'get_document_schemas'):
+                document_schemas = tenant_processor.get_document_schemas()
+            elif hasattr(tenant_processor, 'document_schemas'):
+                document_schemas = tenant_processor.document_schemas
         except Exception as e:
             logging.error(f"Error getting document schemas: {e}")
             document_schemas = {
@@ -567,10 +564,10 @@ def get_model_data():
         # Try to get training history, but handle case where method doesn't exist
         training_history = []
         try:
-            if hasattr(ai_processor, 'get_training_history'):
-                training_history = ai_processor.get_training_history()
-            elif hasattr(ai_processor, 'training_history'):
-                training_history = ai_processor.training_history
+            if hasattr(tenant_processor, 'get_training_history'):
+                training_history = tenant_processor.get_training_history()
+            elif hasattr(tenant_processor, 'training_history'):
+                training_history = tenant_processor.training_history
         except Exception as e:
             logging.warning(f"Unable to get training history: {e}")
         
@@ -606,7 +603,8 @@ def get_model_data():
             "training_history": history_by_type,
             "field_counts": field_counts,
             "extraction_examples": extraction_examples,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # Add timestamp for debugging
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # Add timestamp for debugging
+            "tenant": current_tenant
         })
     except Exception as e:
         logging.error(f"Error getting model data: {e}")
@@ -663,13 +661,14 @@ def get_extraction_examples(doc_type):
         }
     
     return examples
-
-# Route for File Extraction
 @app.route('/extract', methods=['POST'])
 def extract():
     # Get current tenant from session or use default
     current_tenant = session.get('tenant', DEFAULT_TENANT)
     tenant_config = get_tenant_config(current_tenant)
+    
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
     
     # Check if the post request has the file part
     if 'file' not in request.files:
@@ -748,19 +747,24 @@ def extract():
                 try:
                     # Process with tenant-specific AI
                     ai_result = tenant_processor.process_document(text)
-        
-    except Exception as e:
-        logging.error(f"AI processing failed, falling back to legacy parser: {e}")
-        # Fall back to legacy processing
-        data = parse_coa_data(text)
-        data['full_text'] = text
-else:
-    # Use legacy processing
-    logging.info("Using legacy parser (AI not available)")
-    parsing_start = time.time()
-    data = parse_coa_data(text)
-    logging.info(f"Legacy parsing completed in {time.time() - parsing_start:.2f} seconds")
-    data['full_text'] = text
+                    logging.info(f"AI processing completed for tenant {current_tenant}")
+                    
+                    # Convert AI result to format compatible with existing UI
+                    data = adapt_ai_result_to_legacy_format(ai_result)
+                    data['full_text'] = text
+                    
+                except Exception as e:
+                    logging.error(f"AI processing failed, falling back to legacy parser: {e}")
+                    # Fall back to legacy processing
+                    data = parse_coa_data(text)
+                    data['full_text'] = text
+            else:
+                # Use legacy processing
+                logging.info("Using legacy parser (AI not available)")
+                parsing_start = time.time()
+                data = parse_coa_data(text)
+                logging.info(f"Legacy parsing completed in {time.time() - parsing_start:.2f} seconds")
+                data['full_text'] = text
             
             # Add tenant information to the data
             data['tenant'] = current_tenant
@@ -798,6 +802,7 @@ else:
             return jsonify({"error": str(e)}), 500
     
     return jsonify({"error": "File type not allowed"}), 400
+
 
 # ADD THIS NEW ROUTE to your app.py file
 
@@ -882,9 +887,7 @@ def update_pattern():
             "status": "error",
             "message": f"Error updating pattern: {str(e)}"
         }), 500
-        
-# Route for Training the AI
-@app.route('/train', methods=['POST'])
+   @app.route('/train', methods=['POST'])
 def train():
     # Get current tenant from session or use default
     current_tenant = session.get('tenant', DEFAULT_TENANT)
@@ -892,7 +895,7 @@ def train():
     # Get tenant-specific processor
     tenant_processor = get_tenant_processor(current_tenant)
     
-    if not tenant_processor:  # Changed from ai_processor to tenant_processor
+    if not tenant_processor:
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
         
     if 'file' not in request.files:
@@ -901,9 +904,6 @@ def train():
     file = request.files['file']
     doc_type = request.form.get('doc_type', 'unknown')
     annotations_json = request.form.get('annotations', '{}')
-
-# Get tenant-specific processor
-tenant_processor = get_tenant_processor(current_tenant)
     
     try:
         annotations = json.loads(annotations_json)
@@ -961,7 +961,7 @@ tenant_processor = get_tenant_processor(current_tenant)
                     pass
             return jsonify({"status": "error", "message": str(e)}), 500
             
-    return jsonify({"status": "error", "message": "File type not allowed"}), 400
+    return jsonify({"status": "error", "message": "File type not allowed"}), 400     
 
 # Admin Routes
 @app.route('/admin/login', methods=['GET', 'POST'])

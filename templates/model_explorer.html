@@ -164,6 +164,20 @@
         .tab-content.active {
             display: block;
         }
+        
+        /* Custom style for pattern editor */
+        .edit-pattern-btn {
+            margin-top: 10px;
+            display: block;
+        }
+        
+        .pattern-container {
+            position: relative;
+        }
+        
+        .modal-dialog {
+            max-width: 600px;
+        }
     </style>
 </head>
 <body>
@@ -208,6 +222,12 @@
         
         <div id="modelsContainer" class="row" style="display: none;">
             <!-- Models will be inserted here dynamically -->
+        </div>
+        
+        <!-- Debug Info -->
+        <div id="debugInfo" class="alert alert-info mt-4" style="display: none;">
+            <h5><i class="fas fa-bug me-2"></i> Debug Information</h5>
+            <div id="debugContent"></div>
         </div>
     </div>
     
@@ -269,7 +289,10 @@
                                 </div>
                                 <div class="mb-3">
                                     <strong>Pattern:</strong>
-                                    <div class="pattern-text"></div>
+                                    <div class="pattern-container">
+                                        <div class="pattern-text"></div>
+                                        <!-- Edit button will be inserted here -->
+                                    </div>
                                 </div>
                                 <div>
                                     <strong>Example:</strong>
@@ -288,17 +311,87 @@
             </div>
         </div>
     </template>
+    
+    <!-- Pattern Editor Modal (pre-create it) -->
+    <div class="modal fade" id="patternEditorModal" tabindex="-1" aria-labelledby="patternEditorModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="patternEditorModalLabel">Edit Extraction Pattern</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="docTypeInput" class="form-label">Document Type</label>
+                        <input type="text" class="form-control" id="docTypeInput" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="fieldNameInput" class="form-label">Field Name</label>
+                        <input type="text" class="form-control" id="fieldNameInput" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="patternInput" class="form-label">Extraction Pattern</label>
+                        <textarea class="form-control" id="patternInput" rows="4"></textarea>
+                        <small class="text-muted">Use valid regex pattern. Example: (?i)Product\\s+Name\\s*[:.=]\\s*([^\\n]+)</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="savePatternBtn">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Force refresh when coming from the training page -->
     <script>
+        // Debug logging function
+        function debug(message, data) {
+            console.log(message, data);
+            
+            // Also log to debug panel if it exists
+            const debugInfo = document.getElementById('debugInfo');
+            const debugContent = document.getElementById('debugContent');
+            
+            if (debugInfo && debugContent) {
+                debugInfo.style.display = 'block';
+                const timestamp = new Date().toLocaleTimeString();
+                const debugLine = document.createElement('div');
+                debugLine.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+                
+                if (data) {
+                    const dataElement = document.createElement('pre');
+                    dataElement.textContent = JSON.stringify(data, null, 2);
+                    dataElement.style.fontSize = '12px';
+                    dataElement.style.marginTop = '5px';
+                    debugLine.appendChild(dataElement);
+                }
+                
+                debugContent.appendChild(debugLine);
+            }
+        }
+        
         document.addEventListener('DOMContentLoaded', function() {
             // Check if we came from the training page
             const referrer = document.referrer;
             if (referrer && referrer.includes('/training')) {
-                console.log('Coming from training page, forcing cache refresh');
+                debug('Coming from training page, forcing cache refresh');
                 // Add a timestamp to force cache refresh
                 const timestamp = new Date().getTime();
                 fetchModelData(true);
+            } else {
+                fetchModelData(false);
+            }
+            
+            // Check if Bootstrap is loaded correctly
+            if (typeof bootstrap === 'undefined') {
+                debug('WARNING: Bootstrap JS not loaded properly');
+                const errorMsg = document.createElement('div');
+                errorMsg.className = 'alert alert-danger';
+                errorMsg.innerHTML = '<strong>Error:</strong> Required JavaScript libraries not loaded. Pattern editing may not work. Please refresh the page.';
+                document.body.prepend(errorMsg);
+            } else {
+                debug('Bootstrap JS loaded successfully');
             }
         });
         
@@ -314,6 +407,8 @@
                 ? `/api/model-data?_=${new Date().getTime()}` 
                 : '/api/model-data';
             
+            debug('Fetching model data from: ' + url);
+            
             fetch(url, {
                 headers: {
                     'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -324,13 +419,19 @@
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
+                    debug('Successfully loaded model data', {
+                        schemas: Object.keys(data.document_schemas),
+                        tenant: data.tenant
+                    });
                     renderModelData(data);
                 } else {
+                    debug('Error loading model data: ' + data.message);
                     showError(data.message || 'Failed to load model data');
                 }
             })
             .catch(error => {
                 console.error('Error fetching model data:', error);
+                debug('Error fetching model data: ' + error.message);
                 showError('Error loading model data. Please try again.');
             })
             .finally(() => {
@@ -341,76 +442,6 @@
     
     <!-- JavaScript for Model Explorer -->
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Fetch model data
-            fetchModelData();
-            
-            // Handle tab switching
-            document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('tab-item') || e.target.closest('.tab-item')) {
-                    const tabItem = e.target.classList.contains('tab-item') ? e.target : e.target.closest('.tab-item');
-                    const tabName = tabItem.dataset.tab;
-                    const modelCard = tabItem.closest('.model-card');
-                    
-                    // Update active tab
-                    modelCard.querySelectorAll('.tab-item').forEach(item => {
-                        item.classList.remove('active');
-                    });
-                    tabItem.classList.add('active');
-                    
-                    // Show active content
-                    modelCard.querySelectorAll('.tab-content').forEach(content => {
-                        content.classList.remove('active');
-                    });
-                    modelCard.querySelector(`.tab-content[data-tab="${tabName}"]`).classList.add('active');
-                }
-            });
-            
-            // Handle field badge clicks
-            document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('field-badge') || e.target.closest('.field-badge')) {
-                    const fieldBadge = e.target.classList.contains('field-badge') ? e.target : e.target.closest('.field-badge');
-                    const fieldName = fieldBadge.textContent.trim();
-                    const docType = fieldBadge.dataset.docType;
-                    const modelCard = fieldBadge.closest('.model-card');
-                    
-                    // Switch to extraction tab
-                    modelCard.querySelectorAll('.tab-item').forEach(item => {
-                        item.classList.remove('active');
-                    });
-                    modelCard.querySelector('.tab-item[data-tab="extraction"]').classList.add('active');
-                    
-                    // Show active content
-                    modelCard.querySelectorAll('.tab-content').forEach(content => {
-                        content.classList.remove('active');
-                    });
-                    modelCard.querySelector('.tab-content[data-tab="extraction"]').classList.add('active');
-                    
-                    // Show field examples
-                    showFieldExample(modelCard, docType, fieldName);
-                }
-            });
-        });
-        
-        function fetchModelData() {
-            fetch('/api/model-data')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        renderModelData(data);
-                    } else {
-                        showError(data.message || 'Failed to load model data');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching model data:', error);
-                    showError('Error loading model data. Please try again.');
-                })
-                .finally(() => {
-                    document.getElementById('loading').style.display = 'none';
-                });
-        }
-        
         function renderModelData(data) {
             const container = document.getElementById('modelsContainer');
             const schemas = data.document_schemas;
@@ -510,6 +541,56 @@
                 
                 container.appendChild(clone);
             }
+            
+            // Initialize tab switching and field viewing after rendering
+            initializeEventHandlers();
+        }
+        
+        function initializeEventHandlers() {
+            // Handle tab switching
+            document.querySelectorAll('.tab-item').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabName = this.dataset.tab;
+                    const modelCard = this.closest('.model-card');
+                    
+                    // Update active tab
+                    modelCard.querySelectorAll('.tab-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Show active content
+                    modelCard.querySelectorAll('.tab-content').forEach(content => {
+                        content.classList.remove('active');
+                    });
+                    modelCard.querySelector(`.tab-content[data-tab="${tabName}"]`).classList.add('active');
+                });
+            });
+            
+            // Handle field badge clicks
+            document.querySelectorAll('.field-badge').forEach(badge => {
+                badge.addEventListener('click', function() {
+                    debug('Field badge clicked: ' + this.textContent);
+                    const fieldName = this.textContent.trim();
+                    const docType = this.dataset.docType;
+                    const modelCard = this.closest('.model-card');
+                    
+                    // Switch to extraction tab
+                    modelCard.querySelectorAll('.tab-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    modelCard.querySelector('.tab-item[data-tab="extraction"]').classList.add('active');
+                    
+                    // Show active content
+                    modelCard.querySelectorAll('.tab-content').forEach(content => {
+                        content.classList.remove('active');
+                    });
+                    modelCard.querySelector('.tab-content[data-tab="extraction"]').classList.add('active');
+                    
+                    // Show field example
+                    showFieldExample(modelCard, docType, fieldName);
+                });
+            });
         }
         
         function getModelStatus(docType, schema) {
@@ -532,6 +613,8 @@
             // Set field name
             modelCard.querySelector('.example-field-name').textContent = fieldName;
             
+            debug(`Showing field example for ${docType}/${fieldName}`);
+            
             // Fetch examples
             fetch('/api/model-data')
                 .then(response => response.json())
@@ -543,91 +626,83 @@
                             const example = examples.examples[fieldName];
                             
                             // Set pattern
-                            const patternElement = modelCard.querySelector('.pattern-text');
-                            patternElement.textContent = example.pattern;
+                            const patternContainer = modelCard.querySelector('.pattern-container');
+                            const patternText = patternContainer.querySelector('.pattern-text');
+                            patternText.textContent = example.pattern;
                             
-                            // Add edit button next to pattern if not already there
-                            if (!modelCard.querySelector('.edit-pattern-btn')) {
-                                const editBtn = document.createElement('button');
-                                editBtn.className = 'btn btn-sm btn-outline-primary mt-2 edit-pattern-btn';
-                                editBtn.innerHTML = '<i class="fas fa-edit me-1"></i> Edit Pattern';
-                                editBtn.onclick = function() {
-                                    showPatternEditor(docType, fieldName, example.pattern);
-                                };
-                                patternElement.parentNode.appendChild(editBtn);
+                            debug(`Retrieved pattern for ${fieldName}:`, example.pattern);
+                            
+                            // Clear any existing edit button
+                            const existingBtn = patternContainer.querySelector('.edit-pattern-btn');
+                            if (existingBtn) {
+                                existingBtn.remove();
                             }
+                            
+                            // Add edit button
+                            const editBtn = document.createElement('button');
+                            editBtn.className = 'btn btn-sm btn-outline-primary mt-2 edit-pattern-btn';
+                            editBtn.innerHTML = '<i class="fas fa-edit me-1"></i> Edit Pattern';
+                            editBtn.onclick = function(event) {
+                                debug(`Edit button clicked for ${docType}/${fieldName}`);
+                                event.preventDefault();
+                                showPatternEditor(docType, fieldName, example.pattern);
+                            };
+                            patternContainer.appendChild(editBtn);
                             
                             // Set example
                             modelCard.querySelector('.example-text').textContent = example.example;
                         } else {
                             // No example available
-                            modelCard.querySelector('.pattern-text').textContent = 'Custom extraction logic';
+                            const patternText = modelCard.querySelector('.pattern-text');
+                            patternText.textContent = 'Custom extraction logic';
                             modelCard.querySelector('.example-text').textContent = 'No specific example available';
+                            
+                            debug(`No examples found for ${docType}/${fieldName}`);
                         }
                     }
                 })
                 .catch(error => {
                     console.error('Error fetching example data:', error);
+                    debug(`Error fetching examples for ${docType}/${fieldName}: ${error.message}`);
                 });
         }
         
         function showPatternEditor(docType, fieldName, currentPattern) {
-            // Create modal for editing
-            let modalElement = document.getElementById('patternEditorModal');
+            debug('Opening pattern editor', { docType, fieldName, pattern: currentPattern });
             
-            if (!modalElement) {
-                modalElement = document.createElement('div');
-                modalElement.className = 'modal fade';
-                modalElement.id = 'patternEditorModal';
-                modalElement.setAttribute('tabindex', '-1');
+            try {
+                // Get the modal element
+                const modalElement = document.getElementById('patternEditorModal');
                 
-                modalElement.innerHTML = `
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Edit Extraction Pattern</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="mb-3">
-                                    <label for="docTypeInput" class="form-label">Document Type</label>
-                                    <input type="text" class="form-control" id="docTypeInput" readonly>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="fieldNameInput" class="form-label">Field Name</label>
-                                    <input type="text" class="form-control" id="fieldNameInput" readonly>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="patternInput" class="form-label">Extraction Pattern</label>
-                                    <textarea class="form-control" id="patternInput" rows="4"></textarea>
-                                    <small class="text-muted">Use valid regex pattern. Example: (?i)Product\\s+Name\\s*[:.=]\\s*([^\\n]+)</small>
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                <button type="button" class="btn btn-primary" id="savePatternBtn">Save Changes</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
+                // Check if Bootstrap is loaded
+                if (typeof bootstrap === 'undefined') {
+                    console.error('Bootstrap JS is not loaded. Cannot show modal.');
+                    debug('ERROR: Bootstrap JS not loaded - cannot open editor');
+                    alert('Cannot open editor: Bootstrap JavaScript is not loaded. Please refresh the page.');
+                    return;
+                }
                 
-                document.body.appendChild(modalElement);
+                // Fill in the form
+                document.getElementById('docTypeInput').value = docType;
+                document.getElementById('fieldNameInput').value = fieldName;
+                document.getElementById('patternInput').value = currentPattern;
+                
+                // Initialize and show the modal
+                const modal = new bootstrap.Modal(modalElement);
+                modal.show();
+                
+                // Handle save button
+                const saveBtn = document.getElementById('savePatternBtn');
+                saveBtn.onclick = function() {
+                    const newPattern = document.getElementById('patternInput').value;
+                    debug('Save button clicked', { docType, fieldName, newPattern });
+                    savePattern(docType, fieldName, newPattern, modal);
+                };
+            } catch (error) {
+                console.error('Error showing pattern editor:', error);
+                debug('Error showing pattern editor: ' + error.message);
+                alert('Error opening pattern editor: ' + error.message);
             }
-            
-            // Fill in the form
-            document.getElementById('docTypeInput').value = docType;
-            document.getElementById('fieldNameInput').value = fieldName;
-            document.getElementById('patternInput').value = currentPattern;
-            
-            // Initialize and show the modal
-            const modal = new bootstrap.Modal(modalElement);
-            modal.show();
-            
-            // Handle save button
-            document.getElementById('savePatternBtn').onclick = function() {
-                const newPattern = document.getElementById('patternInput').value;
-                savePattern(docType, fieldName, newPattern, modal);
-            };
         }
         
         function savePattern(docType, fieldName, pattern, modal) {
@@ -636,6 +711,8 @@
             const originalText = saveBtn.innerHTML;
             saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Saving...';
             saveBtn.disabled = true;
+            
+            debug('Saving pattern', { docType, fieldName, pattern });
             
             // Send the update to the server
             fetch('/api/update-pattern', {
@@ -656,16 +733,19 @@
                 
                 if (data.status === 'success') {
                     // Show success message
+                    debug('Pattern saved successfully');
                     showNotification('Pattern updated successfully!', 'success');
                     
                     // Refresh the data (force cache refresh)
                     fetchModelData(true);
                 } else {
+                    debug('Error saving pattern: ' + data.message);
                     showNotification(`Error: ${data.message}`, 'error');
                 }
             })
             .catch(error => {
                 console.error('Error updating pattern:', error);
+                debug('Error updating pattern: ' + error.message);
                 showNotification('Error updating pattern', 'error');
             })
             .finally(() => {

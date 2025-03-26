@@ -1,29 +1,42 @@
 FROM python:3.9-slim
 
-# Install Tesseract OCR and Poppler (needed for PDF processing)
-RUN apt-get update && apt-get install -y \
+# Install system dependencies: OCR engine (Tesseract) & PDF utilities (Poppler)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     libtesseract-dev \
     poppler-utils \
-    && rm -rf /var/lib/apt/lists/*
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Set the working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Create required folders (used by app)
+RUN mkdir -p static/css static/js templates models
 
-# Copy application files
-COPY app.py .
+# Copy requirements file first for Docker cache optimization
+COPY requirements.txt .
+
+# Install dependencies (minus torch, which we handle separately)
+RUN pip install --no-cache-dir -r requirements.txt || echo "Proceeding without torch"
+
+# Install PyTorch separately from the official CPU-only wheel source
+RUN pip install --no-cache-dir torch==2.0.1+cpu --index-url https://download.pytorch.org/whl/cpu
+
+# Pre-download transformers model into image (avoids slow cold starts)
+RUN python -c "from transformers import pipeline; pipeline('zero-shot-classification', model='typeform/distilbert-base-uncased-mnli')"
+
+# Copy application code and assets
+COPY app.py ai_document_processor.py ./
 COPY static/ static/
 COPY templates/ templates/
 
-# Expose port - environment variable will override this
+# Environment best practices
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Expose the port Flask runs on
 EXPOSE 5000
 
-# Run the application with the correct port
-CMD gunicorn --bind 0.0.0.0:$PORT app:app
-
-# Run the application
-CMD ["python", "app.py"]
+# Launch the app using Gunicorn (production-ready WSGI server)
+CMD gunicorn --workers=1 --bind 0.0.0.0:${PORT:-5000} --timeout 120 app:app

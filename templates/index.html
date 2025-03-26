@@ -3,149 +3,962 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alchemy COA Intelligence</title>
+    <title>Alchemy OCR Intelligence</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- AG Grid CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-grid.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-theme-alpine.css">
+    
     <style>
-        /* Inline styles for drag and drop - these will be overridden by your styles.css */
-        .file-upload {
-            transition: all 0.3s ease;
+        :root {
+            --alchemy-blue: #0047BB;
+            --alchemy-light-blue: #3F88F6;
+            --alchemy-blue-bg: #e9f0fb;
+            --alchemy-dark: #001952;
+            --alchemy-green: #00A86B;
+            --alchemy-red: #E4002B;
+            --alchemy-grey: #6C757D;
+            --alchemy-light-grey: #F8F9FA;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f6f9;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            margin: 0;
+        }
+        
+        /* Header styles */
+        .navbar {
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 15px 0;
+        }
+        
+        .navbar-brand {
+            font-weight: 500;
+            font-size: 20px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+        
+        .navbar-icon {
+            margin-right: 10px;
+            color: #0047BB;
+        }
+        
+        /* Tenant banner styles */
+        .tenant-banner {
+            background-color: var(--alchemy-blue-bg);
+            padding: 12px 0;
             position: relative;
+        }
+        
+        .tenant-container {
+            text-align: center;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .tenant-info {
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .tenant-name {
+            font-weight: 600;
+        }
+        
+        .back-button {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            align-items: center;
+            padding: 6px 12px;
+            background-color: white;
+            color: var(--alchemy-blue);
+            border: 1px solid var(--alchemy-blue);
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        
+        .back-button:hover {
+            background-color: var(--alchemy-blue);
+            color: white;
+        }
+        
+        .back-button i {
+            margin-right: 6px;
+        }
+        
+        /* Main content styles */
+        .main-content {
+            flex: 1;
+            display: flex;
+            padding: 30px 0;
+        }
+        
+        .content-container {
+            display: flex;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* OCR section styles */
+        .ocr-section {
+            flex: 1;
+            background-color: white;
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-right: 25px;
+        }
+        
+        /* Tips section styles */
+        .tips-section {
+            width: 250px;
+            background-color: var(--alchemy-blue-bg);
+            border-radius: 8px;
+            padding: 20px;
+            height: fit-content;
+        }
+        
+        .tips-title {
+            color: var(--alchemy-blue);
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .tips-title i {
+            margin-right: 10px;
+            color: var(--alchemy-blue);
+        }
+        
+        .tips-list {
+            margin: 0;
+            padding-left: 20px;
+            margin-bottom: 5px;
+        }
+        
+        .tips-list li {
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .tips-list li:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* Form styles */
+        .form-label {
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        
+        .form-select, .form-control {
+            border-radius: 4px;
+            padding: 10px 15px;
+            border: 1px solid #dee2e6;
+            margin-bottom: 20px;
+        }
+        
+        .form-select:focus, .form-control:focus {
+            border-color: var(--alchemy-blue);
+            box-shadow: 0 0 0 3px rgba(0, 71, 187, 0.15);
+        }
+        
+        /* Upload area */
+        .upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 40px 30px;
+            text-align: center;
+            margin-bottom: 25px;
+            transition: all 0.2s ease;
             cursor: pointer;
         }
         
-        .file-upload.highlight {
-            border-color: #4676E8 !important;
-            background-color: rgba(70, 118, 232, 0.1);
+        .upload-area:hover, .upload-area.highlight {
+            border-color: var(--alchemy-blue);
+            background-color: rgba(0, 71, 187, 0.05);
         }
         
-        .file-upload.file-selected {
-            border-color: #28a745 !important;
-            background-color: rgba(40, 167, 69, 0.05);
+        .upload-icon {
+            font-size: 40px;
+            color: #6c757d;
+            margin-bottom: 15px;
         }
         
-        .file-upload::after {
-            content: "or drag and drop file here";
-            display: block;
+        .upload-text {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .upload-hint {
+            color: #6c757d;
+            margin-bottom: 20px;
+        }
+        
+        .btn-choose-file {
+            background-color: white;
+            color: var(--alchemy-blue);
+            border: 1px solid var(--alchemy-blue);
+            padding: 8px 20px;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: inline-block;
+        }
+        
+        .btn-choose-file:hover {
+            background-color: var(--alchemy-blue);
+            color: white;
+        }
+        
+        .file-info {
+            display: flex;
+            align-items: center;
+            color: #6c757d;
             margin-top: 15px;
             font-size: 14px;
-            color: #999;
         }
         
-        /* Added styles for disabled buttons */
-        button.disabled {
-            opacity: 0.65;
-            cursor: not-allowed;
-            pointer-events: none;
+        .file-info i {
+            margin-right: 8px;
+            color: var(--alchemy-blue);
         }
         
-        /* Style for disabled label */
-        label.disabled {
-            opacity: 0.65;
+        /* Action buttons */
+        .button-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .btn-action {
+            flex: 1;
+            padding: 12px;
+            border-radius: 4px;
+            font-weight: 500;
+            text-align: center;
+            border: none;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-extract {
+            background-color: var(--alchemy-blue);
+            color: white;
+        }
+        
+        .btn-extract:hover {
+            background-color: #003d9e;
+        }
+        
+        .btn-extract.disabled {
+            background-color: #cccccc;
+            color: #666666;
             cursor: not-allowed;
-            pointer-events: none;
+        }
+        
+        .btn-submit {
+            background-color: var(--alchemy-green);
+            color: white;
+        }
+        
+        .btn-submit:hover {
+            background-color: #00906b;
+        }
+        
+        .btn-submit.disabled {
+            background-color: #cccccc;
+            color: #666666;
+            cursor: not-allowed;
+        }
+        
+        .btn-reset {
+            background-color: white;
+            color: #333;
+            border: 1px solid #dee2e6;
+        }
+        
+        .btn-reset:hover {
+            background-color: #f5f5f5;
+        }
+        
+        /* Processing status */
+        .processing-status {
+            background-color: var(--alchemy-blue-bg);
+            border: 1px solid rgba(0, 71, 187, 0.2);
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: var(--alchemy-blue);
+        }
+        
+        .progress {
+            height: 6px;
+            border-radius: 3px;
+            background-color: rgba(0, 71, 187, 0.1);
+            margin-top: 10px;
+        }
+        
+        .progress-bar {
+            background-color: var(--alchemy-blue);
+        }
+        
+        /* Results section */
+        .results-section {
+            background-color: white;
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 25px;
+        }
+        
+        .results-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        
+        .data-grid {
+            width: 100%;
+            height: 300px;
+            margin-bottom: 25px;
+        }
+        
+        .raw-text-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        
+        .raw-text {
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 14px;
+            max-height: 250px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: #333;
+            border: 1px solid #dee2e6;
+        }
+        
+        /* Footer styles */
+        .footer {
+            background-color: white;
+            padding: 20px 0;
+            text-align: center;
+            border-top: 1px solid rgba(0, 0, 0, 0.05);
+            margin-top: auto;
+        }
+        
+        .footer-logo {
+            height: 40px;
+            margin-bottom: 10px;
+        }
+        
+        .copyright {
+            color: #6c757d;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        /* Responsive styles */
+        @media (max-width: 992px) {
+            .content-container {
+                flex-direction: column;
+            }
+            
+            .ocr-section {
+                margin-right: 0;
+                margin-bottom: 25px;
+            }
+            
+            .tips-section {
+                width: 100%;
+            }
+            
+            .button-row {
+                flex-direction: column;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .tenant-banner {
+                padding: 12px 20px 45px 20px;
+            }
+            
+            .back-button {
+                top: auto;
+                bottom: 10px;
+                right: 50%;
+                transform: translateX(50%);
+            }
+        }
+        
+        /* AG Grid styles */
+        .ag-theme-alpine {
+            --ag-header-height: 40px;
+            --ag-header-foreground-color: #333;
+            --ag-header-background-color: #f5f5f5;
+            --ag-odd-row-background-color: #f9f9f9;
+            --ag-row-border-color: #eee;
+            --ag-font-size: 14px;
+        }
+        
+        /* Notification styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            max-width: 350px;
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .notification-success {
+            background-color: rgba(0, 168, 107, 0.1);
+            border: 1px solid rgba(0, 168, 107, 0.2);
+            color: var(--alchemy-green);
+        }
+        
+        .notification-warning {
+            background-color: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.2);
+            color: #f59f00;
+        }
+        
+        .notification-error {
+            background-color: rgba(228, 0, 43, 0.1);
+            border: 1px solid rgba(228, 0, 43, 0.2);
+            color: var(--alchemy-red);
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Alchemy COA Intelligence</h1>
-    </div>
-    
-    <div class="tips-section">
-        <div class="tips-content">
-            <strong>Tips for best results:</strong>
-            <ul>
-                <li>Image files (JPG, PNG) process faster than PDFs</li>
-                <li>PDFs with embedded text work best</li>
-                <li>Use clear, high-resolution images of your COA documents</li>
-                <li>You can drag and drop files directly onto the upload area</li>
-            </ul>
+    <!-- Header Navbar -->
+    <nav class="navbar">
+        <div class="container">
+            <span class="navbar-brand">
+                <i class="fas fa-file-alt navbar-icon"></i>
+                Alchemy OCR Intelligence
+            </span>
         </div>
+    </nav>
+    
+    <!-- Tenant Banner -->
+    <div class="tenant-banner">
+        <div class="tenant-container">
+            <div class="tenant-info">
+                Working with tenant: <span class="tenant-name">{{ tenant_name }}</span>
+                <a href="/model-explorer" class="btn btn-sm btn-outline-primary ms-3">
+                    <i class="fas fa-search me-1"></i> Explore AI Models
+                </a>
+                <a href="/training" class="btn btn-sm btn-outline-primary ms-2">
+                    <i class="fas fa-brain me-1"></i> Train AI Model
+                </a>
+            </div>
+        </div>
+        <a href="/" class="back-button">
+            <i class="fas fa-arrow-left"></i> BACK TO TENANTS
+        </a>
     </div>
     
+    <!-- Main Content -->
     <div class="main-content">
-        <div class="upload-section">
-            <h2>Upload COA Document</h2>
-            
-            <div class="form-group">
-                <label class="form-label">File Format</label>
-                <select class="form-select" id="fileFormat">
-                    <option value="pdf" selected>PDF</option>
-                    <option value="image">Image (faster)</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">Select COA File</label>
-                <div class="file-upload" id="dropZone">
-                    <div class="file-upload-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-cloud-arrow-up" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M7.646 5.146a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 6.707V10.5a.5.5 0 0 1-1 0V6.707L6.354 7.854a.5.5 0 1 1-.708-.708l2-2z"/>
-                            <path d="M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383zm.653.757c-.757.653-1.153 1.44-1.153 2.056v.448l-.445.049C2.064 6.805 1 7.952 1 9.318 1 10.785 2.23 12 3.781 12h8.906C13.98 12 15 10.988 15 9.773c0-1.216-1.02-2.228-2.313-2.228h-.5v-.5C12.188 4.825 10.328 3 8 3a4.53 4.53 0 0 0-2.941 1.1z"/>
-                        </svg>
+        <div class="content-container">
+            <!-- OCR Section -->
+            <div class="ocr-section">
+                <form id="ocr-form">
+                    <div class="form-group">
+                        <label for="documentType" class="form-label">Select Document Type</label>
+                        <select class="form-select" id="documentType">
+                            <option value="pdf" selected>PDF Document</option>
+                            <option value="image">Image (JPG, PNG, TIFF)</option>
+                        </select>
                     </div>
-                    <label for="fileInput" id="choose-file-btn" class="custom-file-upload">CHOOSE FILE</label>
-                    <input type="file" id="fileInput" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff">
-                    <div id="fileName"></div>
-                </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Upload Document</label>
+                        <div class="upload-area" id="dropZone">
+                            <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                            <p class="upload-text">Drag & drop your file here</p>
+                            <p class="upload-hint">or</p>
+                            <label for="fileInput" class="btn-choose-file">Choose File</label>
+                            <input type="file" id="fileInput" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff" hidden>
+                            <div id="fileName" class="file-info" style="display: none;">
+                                <i class="fas fa-file-alt"></i>
+                                <span id="fileNameText"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="button-row">
+                        <button type="button" id="extractButton" class="btn-action btn-extract disabled" disabled>EXTRACT DATA</button>
+                        <button type="button" id="sendToAlchemy" class="btn-action btn-submit disabled" disabled>SUBMIT TO ALCHEMY</button>
+                        <button type="button" id="resetButton" class="btn-action btn-reset">RESET</button>
+                    </div>
+                    
+                    <!-- Processing Status -->
+                    <div id="processingStatus" class="processing-status" style="display: none;">
+                        <div class="d-flex align-items-center">
+                            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                            <span id="statusText">Processing document...</span>
+                        </div>
+                        <div class="progress">
+                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Alchemy Record Link -->
+                    <div id="alchemyRecordLink" class="alert alert-success" style="display: none;">
+                        <p class="mb-0">Data successfully sent to Alchemy!</p>
+                        <p class="mb-0"><a href="#" id="recordLink" target="_blank" class="alert-link">View record in Alchemy</a></p>
+                    </div>
+                </form>
                 
-                <div class="file-info">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle" viewBox="0 0 16 16">
-                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                        <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-                    </svg>
-                    Images process faster. Select file type above to change accepted formats.
+                <!-- Results Box -->
+                <div id="results" class="results-section" style="display: none;">
+                    <h5 class="results-title">Extracted Data</h5>
+                    <div id="extractedDataGrid" class="ag-theme-alpine data-grid"></div>
+                    
+                    <h6 class="raw-text-title">Raw Text</h6>
+                    <div id="rawText" class="raw-text"></div>
                 </div>
             </div>
             
-            <div class="button-group">
-                <button id="extractButton" class="btn-extract">EXTRACT DATA</button>
-                <button id="sendToAlchemy" class="btn-submit" disabled>SUBMIT TO ALCHEMY</button>
-                <button id="resetButton" class="btn-reset">RESET</button>
-            </div>
-        </div>
-        
-        <div id="processingStatus" style="display: none;" class="alert alert-info">
-            <div class="d-flex align-items-center">
-                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                <span id="statusText">Processing your document...</span>
-            </div>
-            <div class="progress mt-2" style="height: 5px;">
-                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
-            </div>
-        </div>
-        
-        <div id="alchemyRecordLink" style="display: none;" class="mt-3">
-            <div class="alert alert-success">
-                <p>Data successfully sent to Alchemy!</p>
-                <p><a href="#" id="recordLink" target="_blank">View record in Alchemy</a></p>
-            </div>
-        </div>
-        
-        <div id="results" style="display: none;" class="result-box">
-            <h5>Extracted Data:</h5>
-            <table class="table table-bordered">
-                <tbody id="dataTable">
-                    <!-- Data will be inserted here -->
-                </tbody>
-            </table>
-            
-            <div class="mt-4">
-                <h5>Raw Text:</h5>
-                <pre id="rawText" style="max-height: 200px; overflow-y: auto;"></pre>
+            <!-- Tips Section -->
+            <div class="tips-section">
+                <div class="tips-title">
+                    <i class="fas fa-lightbulb"></i>
+                    Tips for best results:
+                </div>
+                <ul class="tips-list">
+                    <li>Image files (JPG, PNG) process faster than PDFs</li>
+                    <li>PDFs with embedded text work best</li>
+                    <li>Use clear, high-resolution images of your documents</li>
+                    <li>You can drag and drop files directly onto the upload area</li>
+                    <li>Train the AI model with sample documents to improve extraction</li>
+                </ul>
             </div>
         </div>
     </div>
     
+    <!-- Footer -->
     <div class="footer">
         <img src="{{ url_for('static', filename='Alchemy-logo.svg') }}" alt="Alchemy Cloud Logo" class="footer-logo">
         <div class="copyright">© ALCHEMY CLOUD, INC. ALL RIGHTS RESERVED.</div>
     </div>
     
-    <!-- Load button-manager.js before script.js -->
-    <script src="{{ url_for('static', filename='js/button-manager.js') }}"></script>
-    <!-- Your main script file -->
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <!-- Add tenant info for JavaScript -->
+    <script>
+        window.tenantInfo = {
+            tenant: "{{ tenant }}",
+            tenantName: "{{ tenant_name }}"
+        };
+    </script>
+    
+    <!-- AG Grid JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/dist/ag-grid-community.min.js"></script>
+    
+    <!-- JavaScript for file upload handling -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('fileInput');
+            const fileNameDisplay = document.getElementById('fileName');
+            const fileNameText = document.getElementById('fileNameText');
+            const dropZone = document.getElementById('dropZone');
+            const extractButton = document.getElementById('extractButton');
+            const documentType = document.getElementById('documentType');
+            const resetButton = document.getElementById('resetButton');
+            
+            // File input change handler
+            fileInput.addEventListener('change', function() {
+                handleFileSelection(this.files);
+            });
+            
+            // Document type change handler
+            documentType.addEventListener('change', function() {
+                if (documentType.value === 'image') {
+                    fileInput.accept = ".jpg,.jpeg,.png,.tiff";
+                } else {
+                    fileInput.accept = ".pdf";
+                }
+            });
+            
+            // Reset button handler
+            resetButton.addEventListener('click', function() {
+                window.location.reload();
+            });
+            
+            // Drag and drop handling
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dropZone.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                dropZone.classList.remove('highlight');
+            }
+            
+            dropZone.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                handleFileSelection(files);
+            });
+            
+            function handleFileSelection(files) {
+                if (files.length > 0) {
+                    const file = files[0];
+                    
+                    // Display file name
+                    fileNameText.textContent = file.name;
+                    fileNameDisplay.style.display = 'flex';
+                    
+                    // Enable extract button
+                    extractButton.classList.remove('disabled');
+                    extractButton.disabled = false;
+                    
+                    // Set the file input
+                    if (files !== fileInput.files) {
+                        try {
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(file);
+                            fileInput.files = dataTransfer.files;
+                        } catch (e) {
+                            console.error('Unable to set files programmatically:', e);
+                        }
+                    }
+                }
+            }
+            
+            // Initialize AG Grid
+            initializeGrid();
+            
+            // Hook up the extract button event
+            extractButton.addEventListener('click', extractDocument);
+            
+            // Hook up the submit to Alchemy button event
+            document.getElementById('sendToAlchemy').addEventListener('click', sendDataToAlchemy);
+        });
+        
+        // Initialize AG Grid
+        function initializeGrid() {
+            const gridDiv = document.getElementById('extractedDataGrid');
+            
+            const columnDefs = [
+                {
+                    headerName: 'Field',
+                    field: 'field',
+                    minWidth: 150,
+                    maxWidth: 220
+                },
+                {
+                    headerName: 'Value',
+                    field: 'value',
+                    flex: 1,
+                    minWidth: 300,
+                    autoHeight: true,
+                    wrapText: true
+                }
+            ];
+            
+            const gridOptions = {
+                columnDefs: columnDefs,
+                rowData: [],
+                defaultColDef: {
+                    resizable: true,
+                    sortable: true
+                },
+                domLayout: 'autoHeight',
+                animateRows: true,
+                onGridReady: function(params) {
+                    params.api.sizeColumnsToFit();
+                }
+            };
+            
+            new agGrid.Grid(gridDiv, gridOptions);
+            window.extractedDataGrid = { gridOptions: gridOptions };
+        }
+        
+        // Update grid with extracted data
+        function updateGridWithData(data) {
+            const rowData = [];
+            
+            // Check if we have any data other than full_text
+            const hasData = Object.keys(data).filter(key => key !== 'full_text').length > 0;
+            
+            if (!hasData) {
+                rowData.push({
+                    field: 'No structured data',
+                    value: 'No structured data could be extracted. See the raw text below.'
+                });
+            } else {
+                // Transform the data into rows
+                for (const key in data) {
+                    if (key !== 'full_text') {
+                        const value = data[key];
+                        
+                        // Skip null/undefined values or empty strings
+                        if (value === null || value === undefined || value === '') {
+                            continue;
+                        }
+                        
+                        // Format the field name
+                        const formattedKey = key.replace(/_/g, ' ')
+                                             .replace(/\b\w/g, l => l.toUpperCase());
+                        
+                        // Add to row data
+                        rowData.push({
+                            field: formattedKey,
+                            value: value
+                        });
+                    }
+                }
+            }
+            
+            // Update the grid
+            window.extractedDataGrid.gridOptions.api.setRowData(rowData);
+        }
+        
+        // Extract document function
+        function extractDocument() {
+            const fileInput = document.getElementById('fileInput');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showNotification('Please select a file to extract', 'warning');
+                return;
+            }
+            
+            // Reset the results
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('alchemyRecordLink').style.display = 'none';
+            
+            // Show processing status
+            const processingStatus = document.getElementById('processingStatus');
+            const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
+            
+            processingStatus.style.display = 'block';
+            statusText.textContent = 'Uploading document...';
+            progressBar.style.width = '10%';
+            
+            // Simulate progress
+            let progress = 10;
+            const progressInterval = setInterval(() => {
+                if (progress < 90) {
+                    progress += Math.random() * 5;
+                    progressBar.style.width = `${progress}%`;
+                    
+                    if (progress > 20 && progress < 40) {
+                        statusText.textContent = 'Processing document...';
+                    } else if (progress > 40 && progress < 60) {
+                        statusText.textContent = 'Extracting text...';
+                    } else if (progress > 60 && progress < 80) {
+                        statusText.textContent = 'Analyzing data...';
+                    }
+                }
+            }, 1000);
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            // Send request to extract endpoint
+            fetch('/extract', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                clearInterval(progressInterval);
+                
+                if (!response.ok) {
+                    throw new Error(`Error: ${response.status} ${response.statusText}`);
+                }
+                
+                return response.json();
+            })
+            .then(data => {
+                // Complete progress bar
+                progressBar.style.width = '100%';
+                statusText.textContent = 'Processing complete!';
+                
+                // Hide processing after delay
+                setTimeout(() => {
+                    processingStatus.style.display = 'none';
+                }, 1000);
+                
+                // Handle error in response
+                if (data.error) {
+                    showNotification(`Error: ${data.error}`, 'error');
+                    return;
+                }
+                
+                // Display the results
+                const results = document.getElementById('results');
+                const rawText = document.getElementById('rawText');
+                
+                // Set raw text
+                if (data.full_text) {
+                    rawText.textContent = data.full_text;
+                } else {
+                    rawText.textContent = 'No raw text available';
+                }
+                
+                // Update grid with data
+                updateGridWithData(data);
+                
+                // Show results
+                results.style.display = 'block';
+                
+                // Enable submit to Alchemy button
+                const sendToAlchemy = document.getElementById('sendToAlchemy');
+                sendToAlchemy.classList.remove('disabled');
+                sendToAlchemy.disabled = false;
+            })
+            .catch(error => {
+                // Clear interval
+                clearInterval(progressInterval);
+                
+                // Hide processing status
+                processingStatus.style.display = 'none';
+                
+                console.error('Error during extraction:', error);
+                showNotification(`Error: ${error.message}`, 'error');
+            });
+        }
+        
+        // Send data to Alchemy function
+        function sendDataToAlchemy() {
+            const processingStatus = document.getElementById('processingStatus');
+            const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
+            
+            processingStatus.style.display = 'block';
+            statusText.textContent = 'Sending data to Alchemy...';
+            progressBar.style.width = '50%';
+            
+            // Send request to Alchemy endpoint
+            fetch('/send-to-alchemy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(result => {
+                // Hide processing status
+                processingStatus.style.display = 'none';
+                
+                if (result.status === 'success') {
+                    // Show the record link if available
+                    if (result.record_url) {
+                        const recordLink = document.getElementById('recordLink');
+                        const alchemyRecordLink = document.getElementById('alchemyRecordLink');
+                        
+                        recordLink.href = result.record_url;
+                        recordLink.textContent = `View record ${result.record_id} in Alchemy`;
+                        alchemyRecordLink.style.display = 'block';
+                    } else {
+                        showNotification('Data successfully sent to Alchemy!', 'success');
+                    }
+                    
+                    // Disable the send button
+                    const sendToAlchemy = document.getElementById('sendToAlchemy');
+                    sendToAlchemy.disabled = true;
+                    sendToAlchemy.classList.add('disabled');
+                } else {
+                    showNotification(`Error: ${result.message || 'Failed to send data to Alchemy'}`, 'error');
+                }
+            })
+            .catch(error => {
+                // Hide processing status
+                processingStatus.style.display = 'none';
+                
+                console.error('Error sending to Alchemy:', error);
+                showNotification(`Error: ${error.message}`, 'error');
+            });
+        }
+        
+        // Show notification function
+        function showNotification(message, type) {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            
+            const icon = type === 'error' ? 'exclamation-circle' : 
+                        type === 'warning' ? 'exclamation-triangle' : 'check-circle';
+            
+            notification.innerHTML = `<i class="fas fa-${icon} me-2"></i>${message}`;
+            
+            // Add to document
+            document.body.appendChild(notification);
+            
+            // Remove after delay
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transition = 'opacity 0.5s';
+                
+                setTimeout(() => {
+                    document.body.removeChild(notification);
+                }, 500);
+            }, 4000);
+        }
+    </script>
 </body>
 </html>

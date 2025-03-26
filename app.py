@@ -1,17 +1,32 @@
-# Import Section
-from flask import Flask, request, jsonify, render_template, send_from_directory
+# app.py - Complete OCR Application with Admin Functionality
+
+# Standard library imports
 import os
-import pytesseract
-from PIL import Image
-import re
 import json
-import requests
-from werkzeug.utils import secure_filename
-import uuid
 import logging
 import time
-from pdf2image import convert_from_path
+import secrets
+import uuid
+import re
+from datetime import datetime, timedelta
+
+# Third-party imports
+from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import redirect, url_for, Response, session
+import requests
+from werkzeug.utils import secure_filename
+from PIL import Image
+import pytesseract
 import PyPDF2
+from pdf2image import convert_from_path
+
+# Import AI Document Processor with error handling
+try:
+    from ai_document_processor import AIDocumentProcessor
+    ai_available = True
+except ImportError:
+    ai_available = False
+    logging.warning("AI document processor not available, falling back to legacy parser")
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,36 +34,266 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Flask Application Setup
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
+# Secret key for sessions
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))
+
+# Set session timeout (1 hour)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+
 # Configuration Constants
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'tiff'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Alchemy API Configuration
-ALCHEMY_REFRESH_TOKEN = os.getenv('ALCHEMY_REFRESH_TOKEN')
-ALCHEMY_REFRESH_URL = os.getenv('ALCHEMY_REFRESH_URL', 'https://core-production.alchemy.cloud/core/api/v2/refresh-token')
-ALCHEMY_API_URL = os.getenv('ALCHEMY_API_URL', 'https://core-production.alchemy.cloud/core/api/v2/create-record')
-ALCHEMY_BASE_URL = os.getenv('ALCHEMY_BASE_URL', 'https://app.alchemy.cloud/productcaseelnlims4uat/record/')
-ALCHEMY_TENANT_NAME = os.getenv('ALCHEMY_TENANT_NAME', 'productcaseelnlims4uat')
+# Persistent config paths for cloud hosting
+CONFIG_DIR = '/opt/render/project/config'
+CONFIG_PATH = os.path.join(CONFIG_DIR, 'config.json')
+
+# If local development or the directory doesn't exist, use a local path
+if not os.path.exists(CONFIG_DIR):
+    CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_PATH = os.path.join(CONFIG_DIR, 'config.json')
 
 # Global Token Cache
-alchemy_token_cache = {
-    "access_token": None,
-    "expires_at": 0  # Unix timestamp when the token expires
-}
+token_cache = {}
 
-# Route Handlers
-@app.route('/')
-def index():
-    return render_template('index.html')
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    return send_from_directory(app.static_folder, filename)
+# Initialize AI processor
+ai_processor = None
+if ai_available:
+    try:
+        ai_processor = AIDocumentProcessor()
+        logging.info("Enhanced AI Document Processor initialized successfully")
+    except Exception as e:
+        logging.error(f"Error initializing Enhanced AI Document Processor: {e}")
+
+# Configuration Management Functions
+def ensure_config_directory():
+    """Ensure the configuration directory exists"""
+    try:
+        # Log detailed filesystem information
+        logging.info(f"Current working directory: {os.getcwd()}")
+        logging.info(f"Attempting to check {CONFIG_DIR}")
+        
+        # Ensure the directory exists
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        
+        logging.info(f"Ensuring config directory exists: {CONFIG_DIR}")
+    except Exception as e:
+        logging.error(f"Error creating config directory: {str(e)}")
+
+def create_default_config():
+    """Create a default configuration if the config file is not found"""
+    return {
+        "default_tenant": "default",
+        "default_urls": {
+            "refresh_url": "https://core-production.alchemy.cloud/core/api/v2/refresh-token",
+            "api_url": "https://core-production.alchemy.cloud/core/api/v2/update-record",
+            "filter_url": "https://core-production.alchemy.cloud/core/api/v2/filter-records",
+            "find_records_url": "https://core-production.alchemy.cloud/core/api/v2/find-records",
+            "base_url": "https://app.alchemy.cloud/"
+        },
+        "tenants": {
+            "default": {
+                "tenant_name": "productcaseelnlims4uat",
+                "display_name": "Product Case ELN&LIMS UAT",
+                "description": "Primary Alchemy environment",
+                "button_class": "primary",
+                "env_token_var": "DEFAULT_REFRESH_TOKEN",
+                "use_custom_urls": False
+            }
+        }
+    }
+
+def load_config():
+    """Load configuration with diagnostics"""
+    try:
+        # Ensure directory exists
+        ensure_config_directory()
+        
+        # Log file existence and details
+        logging.info(f"Config path exists: {os.path.exists(CONFIG_PATH)}")
+        
+        if os.path.exists(CONFIG_PATH) and os.path.isfile(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    file_contents = f.read()
+                
+                # Parse the contents
+                config = json.loads(file_contents)
+                
+                # Validate config structure
+                if config and 'tenants' in config:
+                    logging.info("Successfully loaded configuration")
+                    return config
+            except Exception as read_error:
+                logging.error(f"Error reading config file: {read_error}")
+        
+        # If no config found, create and save default
+        logging.warning("No existing configuration found. Creating default configuration.")
+        default_config = create_default_config()
+        save_config(default_config)
+        
+        return default_config
+    
+    except Exception as e:
+        logging.error(f"Unexpected error in load_config: {str(e)}")
+        default_config = create_default_config()
+        save_config(default_config)
+        return default_config
+
+def save_config(config):
+    """Save configuration to file"""
+    try:
+        # Ensure directory exists
+        ensure_config_directory()
+        
+        # Check if the configuration is valid
+        if not config or 'tenants' not in config or len(config.get('tenants', {})) == 0:
+            logging.error("Attempted to save invalid configuration")
+            return False
+        
+        # Log the directory and file path
+        logging.info(f"Attempting to save config to: {CONFIG_PATH}")
+        
+        # Save the file
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        logging.info(f"Configuration successfully saved to {CONFIG_PATH}")
+        return True
+    except Exception as e:
+        logging.error(f"Unexpected error saving configuration: {str(e)}")
+        return False
+
+def get_tenant_config(tenant_id):
+    """Get tenant configuration from config file"""
+    if tenant_id not in CONFIG["tenants"]:
+        logging.error(f"Tenant {tenant_id} not found in configuration")
+        tenant_id = DEFAULT_TENANT
+    
+    tenant = CONFIG["tenants"][tenant_id]
+    
+    # Build the complete tenant configuration
+    tenant_config = {
+        "tenant_id": tenant_id,
+        "tenant_name": tenant.get("tenant_name"),
+        "display_name": tenant.get("display_name", tenant.get("tenant_name")),
+        "description": tenant.get("description", ""),
+        "button_class": tenant.get("button_class", "primary"),
+    }
+    
+    # Check for a directly stored refresh token first
+    if "stored_refresh_token" in tenant and tenant["stored_refresh_token"]:
+        tenant_config["refresh_token"] = tenant["stored_refresh_token"]
+    else:
+        # Fall back to environment variable
+        tenant_config["refresh_token"] = os.getenv(tenant.get("env_token_var"))
+    
+    # Add URLs based on config
+    if tenant.get("use_custom_urls") and "custom_urls" in tenant:
+        tenant_config.update({
+            "refresh_url": tenant["custom_urls"].get("refresh_url"),
+            "api_url": tenant["custom_urls"].get("api_url"),
+            "filter_url": tenant["custom_urls"].get("filter_url"),
+            "find_records_url": tenant["custom_urls"].get("find_records_url"),
+            "base_url": tenant["custom_urls"].get("base_url")
+        })
+    else:
+        tenant_config.update({
+            "refresh_url": DEFAULT_URLS["refresh_url"],
+            "api_url": DEFAULT_URLS["api_url"],
+            "filter_url": DEFAULT_URLS["filter_url"],
+            "find_records_url": DEFAULT_URLS["find_records_url"],
+            "base_url": DEFAULT_URLS["base_url"]
+        })
+    
+    return tenant_config
+
+def refresh_alchemy_token(tenant):
+    """Refresh the Alchemy API token for a specific tenant"""
+    global token_cache
+    
+    # Get tenant configuration
+    tenant_config = get_tenant_config(tenant)
+    refresh_token = tenant_config.get('refresh_token')
+    refresh_url = tenant_config.get('refresh_url')
+    tenant_name = tenant_config.get('tenant_name')
+    
+    # Create token cache entry for tenant if it doesn't exist
+    if tenant not in token_cache:
+        token_cache[tenant] = {
+            "access_token": None,
+            "expires_at": 0
+        }
+    
+    current_time = time.time()
+    if (token_cache[tenant]["access_token"] and 
+        token_cache[tenant]["expires_at"] > current_time + 300):
+        logging.info(f"Using cached Alchemy token for tenant: {tenant}")
+        return token_cache[tenant]["access_token"]
+    
+    if not refresh_token:
+        logging.error(f"Missing refresh token for tenant: {tenant}")
+        return None
+    
+    try:
+        logging.info(f"Refreshing Alchemy API token for tenant: {tenant}")
+        response = requests.put(
+            refresh_url, 
+            json={"refreshToken": refresh_token},
+            headers={"Content-Type": "application/json"}
+        )
+        
+        if not response.ok:
+            logging.error(f"Failed to refresh token for tenant {tenant}. Status: {response.status_code}, Response: {response.text}")
+            return None
+        
+        data = response.json()
+        
+        # Find token for the specified tenant
+        tenant_token = next((token for token in data.get("tokens", []) 
+                            if token.get("tenant") == tenant_name), None)
+        
+        if not tenant_token:
+            logging.error(f"Tenant '{tenant_name}' not found in refresh response")
+            return None
+        
+        # Cache the token
+        access_token = tenant_token.get("accessToken")
+        expires_in = tenant_token.get("expiresIn", 3600)
+        
+        token_cache[tenant] = {
+            "access_token": access_token,
+            "expires_at": current_time + expires_in
+        }
+        
+        logging.info(f"Successfully refreshed Alchemy token for tenant {tenant}, expires in {expires_in} seconds")
+        return access_token
+        
+    except Exception as e:
+        logging.error(f"Error refreshing Alchemy token for tenant {tenant}: {str(e)}")
+        return None
 
 # Utility Functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extract_text_from_pdf_without_ocr(pdf_path):
+    """Try to extract text directly from PDF without OCR"""
+    try:
+        text = ""
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            for page_num in range(min(5, len(reader.pages))):  # Only process first 5 pages on free tier
+                page_text = reader.pages[page_num].extract_text() or ""
+                if page_text:
+                    text += f"--- Page {page_num+1} ---\n{page_text}\n\n"
+        
+        return text if len(text.strip()) > 100 else None
+    except Exception as e:
+        logging.error(f"Error extracting text directly from PDF: {e}")
+        return None
 
 def preprocess_text_for_tables(text):
     """Preprocess text to better handle table structures"""
@@ -64,678 +309,250 @@ def preprocess_text_for_tables(text):
     
     return "\n".join(processed_lines)
 
-def extract_text_from_pdf_without_ocr(pdf_path):
-    """Try to extract text directly from PDF without OCR"""
+# Authentication for admin routes
+def authenticate(username, password):
+    """Validate admin credentials"""
+    admin_username = os.getenv('ADMIN_USERNAME', 'admin')
+    admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+    return username == admin_username and password == admin_password
+
+@app.before_request
+def require_auth():
+    """
+    Require authentication for admin routes with session timeout
+    Sessions expire after 1 hour of inactivity
+    """
+    if request.path.startswith('/admin') and not request.path.startswith('/admin/login'):
+        # Skip authentication for the login page itself
+        if request.path == '/admin/login':
+            return None
+            
+        # Check if user is already authenticated and session is still valid
+        if 'admin_authenticated' in session and session['admin_authenticated']:
+            # Check if last activity was recorded 
+            if 'last_activity' in session:
+                # If more than 1 hour since last activity, invalidate the session
+                last_activity = datetime.fromisoformat(session['last_activity'])
+                if datetime.utcnow() - last_activity > timedelta(hours=1):
+                    session.pop('admin_authenticated', None)
+                    session.pop('last_activity', None)
+                    return redirect(url_for('admin_login'))
+                
+            # Update last activity time
+            session['last_activity'] = datetime.utcnow().isoformat()
+            return None
+        else:
+            # Not authenticated, redirect to login page
+            return redirect(url_for('admin_login'))
+
+# Load configuration
+ensure_config_directory()
+CONFIG = load_config()
+DEFAULT_URLS = CONFIG["default_urls"]
+DEFAULT_TENANT = CONFIG["default_tenant"]
+
+# Route Handlers
+@app.route('/')
+def index():
+    """Main route that shows tenant selector"""
+    return render_template('tenant_selector.html', tenants=CONFIG["tenants"])
+
+@app.route('/tenant/<tenant>')
+def process_tenant(tenant):
+    """Process a specific tenant"""
+    # Validate tenant
+    if tenant not in CONFIG["tenants"]:
+        return render_template('error.html', message=f"Unknown tenant: {tenant}"), 404
+    
+    tenant_config = get_tenant_config(tenant)
+    
+    app.logger.info(f"Rendering index.html for tenant: {tenant} ({tenant_config['tenant_name']})")
+    # Store the tenant in session for future requests
+    session['tenant'] = tenant
+    return render_template('index.html', tenant=tenant, tenant_name=tenant_config['display_name'])
+
+@app.route('/healthz')
+def health():
+    """Health check endpoint"""
+    return "ok"
+
+@app.route('/training')
+def training():
+    """Route for the training page"""
+    return render_template('training.html')
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files"""
+    return send_from_directory(app.static_folder, filename)
+
+# Model Management Routes
+@app.route('/model-info')
+def model_info():
+    """View information about the AI model for debugging"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
     try:
-        text = ""
-        with open(pdf_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            for page_num in range(min(2, len(reader.pages))):
-                page_text = reader.pages[page_num].extract_text() or ""
-                if page_text:
-                    text += f"--- Page {page_num+1} ---\n{page_text}\n\n"
+        # Get model information
+        document_schemas = ai_processor.get_document_schemas()
+        training_history = ai_processor.get_training_history()
         
-        return text if len(text.strip()) > 100 else None
+        # Export the model configuration
+        export_result = ai_processor.export_model_config('model_config.json')
+        
+        return jsonify({
+            "status": "success", 
+            "document_schemas": document_schemas,
+            "training_history": training_history,
+            "export_result": export_result
+        })
     except Exception as e:
-        logging.error(f"Error extracting text directly from PDF: {e}")
-        return None
+        logging.error(f"Error getting model info: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-def format_purity_value(purity_string):
-    """Extract and format the purity value for Alchemy API"""
-    if not purity_string:
-        return ""
-    
-    # For benzene document, always return the correct value
-    if isinstance(purity_string, str) and "99.95" in purity_string:
-        return "99.95"
-    
-    # Try to extract just the first number from the string
-    if isinstance(purity_string, str):
-        # Extract the first number in the string
-        match = re.search(r'(\d+\.\d+)', purity_string)
-        if match:
-            return match.group(1)
-    
-    # Default fallback
-    return "99.95"  # Correct value for benzene
+@app.route('/model-explorer')
+def model_explorer():
+    """Display the AI model explorer page"""
+    return render_template('model_explorer.html')
 
-def detect_coa_type(text):
-    """Detect the type of COA document and its vendor"""
-    result = {
-        "type": "Unknown Document Type",
-        "vendor": "Unknown"
-    }
-    
-    # Check for Certificate of Analysis
-    if re.search(r"CERTIFICATE\s+OF\s+ANALYSIS", text, re.IGNORECASE):
-        result["type"] = "Certificate of Analysis"
-    
-    # Check for vendor-specific patterns
-    if re.search(r"SIGMA(-|\s)?ALDRICH|SIGALD", text, re.IGNORECASE):
-        result["vendor"] = "Sigma-Aldrich"
-    # More specific pattern for CHEMIPAN Benzene COA - look for Reference Material
-    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) and re.search(r"Reference Material No\. CHE USC", text, re.IGNORECASE):
-        result["vendor"] = "Z.D. CHEMIPAN"
-        result["document_type"] = "chemipan-benzene"
-    # Generic detection for CHEMIPAN documents
-    elif re.search(r"Z\.D\.\s*[\"']?CHEMIPAN[\"']?", text, re.IGNORECASE) or re.search(r"Polish Academy of Sciences", text, re.IGNORECASE):
-        result["vendor"] = "Z.D. CHEMIPAN"
-        result["document_type"] = "chemipan-generic"
-    elif re.search(r"BENZENE", text, re.IGNORECASE) and re.search(r"Certified purity", text, re.IGNORECASE):
-        # This is a Benzene COA but vendor might not be clear
-        result["vendor"] = "Z.D. CHEMIPAN"  # Default to CHEMIPAN for Benzene
-        result["document_type"] = "chemipan-benzene"
-    
-    return result
-
-def extract_sigma_aldrich_data(text, data):
-    """Extract data specific to Sigma-Aldrich format"""
-    # Set document type
-    data["document_type"] = "sigma-aldrich-hcl"
-    
-    # Product Name (multiple patterns with priorities)
-    product_patterns = [
-        r"Product Name:\s*([A-Za-z0-9\s\-\.,()%]+)",
-        r"Item Name:\s*([A-Za-z0-9\s\-\.,()%]+)"
-    ]
-    
-    for pattern in product_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match and match.group(1).strip():
-            data["product_name"] = match.group(1).strip()
-            break
-    
-    # If product name not found at top, check the end (Sigma-Aldrich specific)
-    if "product_name" not in data:
-        lines = text.split('\n')
-        for line in reversed(lines):
-            if "Product Name:" in line:
-                product_match = re.search(r"Product Name:\s*(.*?)$", line)
-                if product_match:
-                    data["product_name"] = product_match.group(1).strip()
-                    break
-    
-    # Batch/Lot Number
-    batch_patterns = [
-        r"Batch Number:\s*([A-Za-z0-9\-]+)",
-        r"Lot Number:\s*([A-Za-z0-9\-]+)"
-    ]
-    
-    for pattern in batch_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            data["batch_number"] = match.group(1).strip()
-            data["lot_number"] = match.group(1).strip()  # Store both fields
-            break
-    
-    # CAS Number
-    cas_match = re.search(r"CAS Number:\s*([0-9\-]+)", text, re.IGNORECASE)
-    if cas_match:
-        data["cas_number"] = cas_match.group(1).strip()
-    
-    # Release Date
-    date_match = re.search(r"Quality Release Date:\s*(\d{1,2}\s+[A-Z]{3}\s+\d{4})", text, re.IGNORECASE)
-    if date_match:
-        data["release_date"] = date_match.group(1).strip()
-    
-    # Extract test results for Sigma-Aldrich format
-    extract_sigma_aldrich_test_results(text, data)
-
-def extract_chemipan_benzene_data(text, data):
-    """Extract data specific to CHEMIPAN Benzene format - only fields present in the actual document"""
-    # Set document type and supplier
-    data["document_type"] = "chemipan-benzene"
-    data["supplier"] = "Z.D. CHEMIPAN"
-    data["product_name"] = "BENZENE"
-    
-    # Extract Reference Material Number
-    ref_match = re.search(r"Reference Material No\.\s*(CHE USC \d+)", text, re.IGNORECASE)
-    if ref_match:
-        data["reference_material_no"] = ref_match.group(1).strip()
-    else:
-        # Fallback for this specific document
-        data["reference_material_no"] = "CHE USC 11"
-    
-    # Extract lot number - Fix: handle OCR misreading 1 as I
-    lot_match = re.search(r"Lot\s+number:?\s*([I1]\/\d+)", text, re.IGNORECASE)
-    if lot_match:
-        # Always correct "I/2009" to "1/2009" for this document
-        lot_value = lot_match.group(1).strip().replace("I/", "1/")
-        data["lot_number"] = lot_value
-        data["batch_number"] = lot_value  # Use same value for both
-    else:
-        # Fallback for this specific document's lot number
-        data["lot_number"] = "1/2009"
-        data["batch_number"] = "1/2009"
-    
-    # Extract CAS Number - Fix: handle OCR misreading and provide fallback
-    cas_match = re.search(r"CAS\s+No\.?:?\s*\[?([0-9\-]+)\]?", text, re.IGNORECASE)
-    if cas_match:
-        cas_value = cas_match.group(1).strip()
-        # For benzene documents, validate against known CAS
-        if re.search(r"BENZENE", text, re.IGNORECASE) and (cas_value == "17" or cas_value == "171-43-2" or cas_value == "17I-43-2"):
-            data["cas_number"] = "71-43-2"  # Correct value for benzene
-        else:
-            data["cas_number"] = cas_value
-    else:
-        # Fallback for benzene
-        data["cas_number"] = "71-43-2"
-    
-    # Extract formula
-    formula_match = re.search(r"Formula:?\s*([A-Za-z0-9]+)", text, re.IGNORECASE)
-    if formula_match:
-        data["formula"] = formula_match.group(1).strip()
-    else:
-        # Fallback for benzene
-        data["formula"] = "C6H6"
-    
-    # Extract molecular weight
-    mw_match = re.search(r"Mol\.\s*Weight:?\s*([\d\.]+)", text, re.IGNORECASE)
-    if mw_match:
-        data["molecular_weight"] = mw_match.group(1).strip()
-    else:
-        # Fallback for benzene
-        data["molecular_weight"] = "78.11"
-    
-    # Extract quantity
-    quantity_match = re.search(r"Quantity:?\s*(\d+\s*ml)", text, re.IGNORECASE)
-    if quantity_match:
-        data["quantity"] = quantity_match.group(1).strip()
-    else:
-        # Fallback for this document
-        data["quantity"] = "2 ml"
-    
-    # Extract storage information
-    storage_match = re.search(r"Store\s+at:?\s*([a-zA-Z\s]+temperature)", text, re.IGNORECASE)
-    if storage_match:
-        data["storage"] = storage_match.group(1).strip()
-    else:
-        # Fallback for this document
-        data["storage"] = "room temperature"
-    
-    # Extract purity
-    purity_match = re.search(r"Certified\s+puri(?:ty|[Ęt]y):?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)", text, re.IGNORECASE)
-    if purity_match:
-        data["purity"] = purity_match.group(1).strip()
-    else:
-        # Try detection purity from Det. Purity field
-        det_purity_match = re.search(r"Det\.\s+Purity:?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)", text, re.IGNORECASE)
-        if det_purity_match:
-            data["purity"] = det_purity_match.group(1).strip()
-        else:
-            # Fallback for benzene
-            data["purity"] = "99.95 ± 0.02 %"
-    
-    # Extract date of analysis - use date_of_analysis instead of release_date
-    date_match = re.search(r"Date\s+of\s+Analysis:?\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})", text, re.IGNORECASE)
-    if date_match:
-        data["date_of_analysis"] = date_match.group(1).strip()
-    else:
-        # Fallback for this document
-        data["date_of_analysis"] = "7 January 2009"
-    
-    # Extract expiry date
-    expiry_match = re.search(r"Expiry\s+Date:?\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})", text, re.IGNORECASE)
-    if expiry_match:
-        data["expiry_date"] = expiry_match.group(1).strip()
-    else:
-        # Fallback for this document
-        data["expiry_date"] = "7 January 2012"
-    
-    # Extract Analytical Data fields
-    extract_chemipan_analytical_data(text, data)
-
-def extract_sigma_aldrich_test_results(text, data):
-    """Extract test results from Sigma-Aldrich COA format"""
-    # Find the test results section
-    test_section_match = re.search(r"Test\s+Specification\s+Result(.*?)(?:Recommended\s+Retest\s+Period|Recommended\s+Retest\s+Date|Quality\s+Control)", text, re.IGNORECASE | re.DOTALL)
-    
-    if not test_section_match:
-        return
-        
-    test_section = test_section_match.group(1)
-    lines = test_section.split('\n')
-    test_results = {}
-    
-    current_test = None
-    
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith('_'):
-            continue
-        
-        # Pattern 1: Test with < specification and result
-        less_than_match = re.match(r"^([^<]+)(<[^_]+)[_\s]+(.+)$", line)
-        if less_than_match:
-            test_name = less_than_match.group(1).strip()
-            specification = less_than_match.group(2).strip()
-            result = less_than_match.group(3).strip()
-            test_results[test_name] = {
-                "specification": specification,
-                "result": result
-            }
-            current_test = test_name
-            continue
-        
-        # Pattern 2: Test with range specification
-        range_match = re.match(r"^([^0-9]+)([\d\.]+\s*-\s*[\d\.]+\s*[%\w]*)[_\s]+(.+)$", line)
-        if range_match:
-            test_name = range_match.group(1).strip()
-            specification = range_match.group(2).strip()
-            result = range_match.group(3).strip()
-            test_results[test_name] = {
-                "specification": specification,
-                "result": result
-            }
-            current_test = test_name
-            continue
-        
-        # Pattern 3: Simple descriptive tests
-        simple_match = re.match(r"^([^<]+)(Clear|Colorless|Liquid|Conforms)\s*(Clear|Colorless|Liquid|Conforms)?$", line)
-        if simple_match:
-            test_name = simple_match.group(1).strip()
-            specification = simple_match.group(2).strip()
-            result = simple_match.group(3).strip() if simple_match.group(3) else ""
-            test_results[test_name] = {
-                "specification": specification,
-                "result": result
-            }
-            current_test = test_name
-            continue
-        
-        # Pattern 4: Line continuation
-        if line.startswith('(') and current_test:
-            # Append to current test name
-            updated_test_name = f"{current_test} {line}"
-            test_data = test_results.pop(current_test, {})
-            test_results[updated_test_name] = test_data
-            current_test = updated_test_name
-            continue
-        
-        # Pattern 5: Continuation of "Free from Suspended Matter or Sediment"
-        if line == "Free from Suspended Matter or Sediment" and current_test and current_test.startswith("Appearance"):
-            # Append to current test name
-            updated_test_name = f"{current_test} {line}"
-            test_data = test_results.pop(current_test, {})
-            test_results[updated_test_name] = test_data
-            current_test = updated_test_name
-            continue
-        
-        # Pattern 6: Split by multiple spaces for unrecognized formats
-        parts = re.split(r'\s{2,}|\t', line)
-        parts = [p for p in parts if p.strip()]
-        if len(parts) >= 2:
-            test_name = parts[0].strip()
-            if len(parts) == 2:
-                # Just test and result
-                spec = ""
-                result = parts[1].strip()
-            else:
-                # Test, spec, and result
-                spec = parts[1].strip()
-                result = " ".join(parts[2:]).strip()
-                
-            test_results[test_name] = {
-                "specification": spec,
-                "result": result
-            }
-            current_test = test_name
-    
-    if test_results:
-        data["test_results"] = test_results
-
-def extract_chemipan_analytical_data(text, data):
-    """Extract analytical data from CHEMIPAN Benzene COA - only fields in the actual document"""
-    # Extract analytical data fields
-    analytical_data = {}
-    
-    # Extract column details
-    column_match = re.search(r"Column:[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if column_match:
-        analytical_data["Column"] = column_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Column"] = "30 m x 0.25 mm x 0.25 µm HP-35"
-    
-    # Extract column temperature
-    temp_match = re.search(r"Column Temperature:[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if temp_match:
-        analytical_data["Column Temperature"] = temp_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Column Temperature"] = "50°C"
-    
-    # Extract carrier gas
-    gas_match = re.search(r"Carrier Gas:[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if gas_match:
-        analytical_data["Carrier Gas"] = gas_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Carrier Gas"] = "N₂, 1 ml/min"
-    
-    # Extract detector
-    detector_match = re.search(r"Detector:[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if detector_match:
-        analytical_data["Detector"] = detector_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Detector"] = "Flame ionisation"
-    
-    # Extract contaminants
-    contaminants_match = re.search(r"Contaminants:[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if contaminants_match:
-        analytical_data["Contaminants"] = contaminants_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Contaminants"] = "0.01 ± 0.01 % (n = 7)"
-    
-    # Extract water content
-    water_match = re.search(r"Water\s+\([Kk]arl\s+Fischer\):[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if water_match:
-        analytical_data["Water (Karl Fischer)"] = water_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Water (Karl Fischer)"] = "0.04 ± 0.01 % (n = 3)"
-    
-    # Extract purity determination
-    det_purity_match = re.search(r"Det\.\s+Purity:[\s\n]*([^\n]+)", text, re.IGNORECASE)
-    if det_purity_match:
-        analytical_data["Det. Purity"] = det_purity_match.group(1).strip()
-    else:
-        # Fallback for this document
-        analytical_data["Det. Purity"] = "99.95 ± 0.02 %"
-    
-    # Store analytical data in the data dictionary
-    if analytical_data:
-        data["analytical_data"] = analytical_data
-
-def extract_common_metadata(text, data):
-    """Extract common metadata using multiple patterns for each field"""
-    # Large collection of patterns for common fields
-    metadata_patterns = {
-        "product_name": [
-            r"Product\s+Name:?\s*(.*?)(?:\r?\n|$)",
-            r"Material:?\s*(.*?)(?:\r?\n|$)",
-            r"Product:?\s*(.*?)(?:\r?\n|$)",
-            r"Certificate\s+of\s+Analysis\s+for\s+([A-Za-z0-9\s\-]+)"
-        ],
-        "batch_number": [
-            r"Batch\s+Number:?\s*(.*?)(?:\r?\n|$)",
-            r"Batch\s+No\.?:?\s*(.*?)(?:\r?\n|$)",
-            r"Lot\s+Number:?\s*(.*?)(?:\r?\n|$)",
-            r"Lot\s+No\.?:?\s*(.*?)(?:\r?\n|$)"
-        ],
-        "cas_number": [
-            r"CAS\s+Number:?\s*(.*?)(?:\r?\n|$)",
-            r"CAS\s+No\.?:?\s*\[?([0-9\-]+)\]?",
-            r"CAS:?\s*(.*?)(?:\r?\n|$)",
-            r"CAS.*?([0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3})"
-        ],
-        "release_date": [
-            r"Quality\s+Release\s+Date:?\s*(.*?)(?:\r?\n|$)",
-            r"Release\s+Date:?\s*(.*?)(?:\r?\n|$)",
-            r"Date\s+of\s+Release:?\s*(.*?)(?:\r?\n|$)",
-            r"Date\s+of\s+Analysis:?\s*(.*?)(?:\r?\n|$)",
-            r"Manufacture\s+Date:?\s*(.*?)(?:\r?\n|$)"
-        ],
-        "purity": [
-            r"Purity:?\s*(.*?)(?:\r?\n|$)",
-            r"Certified\s+purity:?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
-            r"Certified\s+puriĘ:?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",  # Handle OCR misreading
-            r"Det\.\s+Purity:?\s*([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)",
-            r"(?:purity|pure).*?([\d\.]+\s*[±\+\-]\s*[\d\.]+\s*%)"
-        ],
-        "formula": [
-            r"Formula:\s*([A-Za-z0-9]+)",
-            r"Mol(?:ecular)?\s+Formula:\s*([A-Za-z0-9]+)"
-        ],
-        "product_number": [
-            r"Product\s+Number:\s*([A-Za-z0-9\-]+)",
-            r"Product\s+No\.?:?\s*([A-Za-z0-9\-]+)",
-            r"Cat(?:alog)?\s+Number:?\s*([A-Za-z0-9\-]+)"
-        ]
-    }
-    
-    # Try each pattern for fields that haven't been found yet
-    for field, patterns in metadata_patterns.items():
-        if field not in data or not data[field]:
-            for pattern in patterns:
-                match = re.search(pattern, text, re.IGNORECASE)
-                if match and match.group(1).strip():
-                    data[field] = match.group(1).strip()
-                    break
-
-def extract_generic_test_results(text, data):
-    """Extract test results using various strategies based on document structure"""
-    # First try to find a structured test results section
-    test_headers = ["Test", "Parameter", "Analysis", "Description", "Attribute"]
-    spec_headers = ["Specification", "Spec", "Limit", "Range"]
-    result_headers = ["Result", "Value", "Measured", "Reading", "Reported"]
-    
-    # Build regex pattern for table header with various header combinations
-    header_pattern = r"("
-    header_pattern += "|".join(test_headers)
-    header_pattern += r")[\s\t]+("
-    header_pattern += "|".join(spec_headers)
-    header_pattern += r")[\s\t]+("
-    header_pattern += "|".join(result_headers)
-    header_pattern += r").*?\n(.*?)(?:[\r\n]{2,}|$)"
-    
-    test_section_match = re.search(header_pattern, text, re.IGNORECASE | re.DOTALL)
-    
-    if test_section_match:
-        test_section = test_section_match.group(4)
-        lines = test_section.split('\n')
-        test_results = {}
-        
-        for line in lines:
-            if not line.strip() or re.match(r'^[-_=\s]+$', line):
-                continue
-                
-            # Try to extract test, specification and result from the line
-            parts = re.split(r'\s{2,}|\t', line.strip())
-            parts = [p for p in parts if p.strip()]
-            
-            if len(parts) >= 2:
-                test_name = parts[0].strip()
-                if len(parts) == 2:
-                    # Just test and result
-                    test_results[test_name] = {
-                        "specification": "",
-                        "result": parts[1].strip()
-                    }
-                else:
-                    # Test, spec, and result
-                    test_results[test_name] = {
-                        "specification": parts[1].strip(),
-                        "result": parts[2].strip() if len(parts) > 2 else ""
-                    }
-        
-        if test_results:
-            data["test_results"] = test_results
-            return
-    
-    # Fallback method: Look for individual test patterns
-    test_patterns = [
-        r"([\w\s\-]+):\s*(<[\d\.\s]+(?:ppm|%)|[\d\.]+\s*-\s*[\d\.]+\s*(?:ppm|%))\s*[_\s]+\s*([\w\d\s\.<>]+)(?:\n|$)",
-        r"([\w\s\-]+)(?:\s{2,}|\t)(Pass|Fail|[\d\.]+(?:ppm|%)|\<[\d\.]+(?:ppm|%))(?:\n|$)"
-    ]
-    
-    test_results = {}
-    for pattern in test_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for match in matches:
-            test_name = match[0].strip()
-            
-            if len(match) == 3:
-                # Pattern with test, spec, result
-                specification = match[1].strip()
-                result = match[2].strip()
-            else:
-                # Pattern with just test and result
-                specification = ""
-                result = match[1].strip()
-                
-            test_results[test_name] = {
-                "specification": specification,
-                "result": result
-            }
-    
-    if test_results:
-        data["test_results"] = test_results
-
-def validate_and_correct_data(data, original_text):
-    """Validate and correct extracted data - prevent addition of non-existent fields"""
-    # Handle document-specific validation
-    if data.get("document_type") == "chemipan-benzene":
-        # Ensure supplier is correctly set for Benzene documents
-        data["supplier"] = "Z.D. CHEMIPAN"
-        
-        # Make sure product name is correct
-        data["product_name"] = "BENZENE"
-        
-        # Fix: Ensure lot number is correct for this specific document
-        data["lot_number"] = "1/2009"
-        data["batch_number"] = "1/2009"
-        
-        # Fix: Ensure CAS number is correct for benzene
-        data["cas_number"] = "71-43-2"
-        
-        # REMOVE "test_results" if it was added but doesn't exist in actual document
-        if "test_results" in data:
-            del data["test_results"]
-        
-        # Remove appearance fields that don't exist in the actual document
-        fields_to_remove = ["appearance", "color", "form", "clarity"]
-        for field in fields_to_remove:
-            if field in data:
-                del data[field]
-        
-        # Rename release_date to date_of_analysis for consistency with document
-        if "release_date" in data and "date_of_analysis" not in data:
-            data["date_of_analysis"] = data["release_date"]
-            del data["release_date"]
-    
-    # For Sigma-Aldrich HCl documents
-    elif data.get("document_type") == "sigma-aldrich-hcl":
-        # If HCl document and product name is empty, but we know it contains Hydrochloric acid
-        if (not data.get("product_name") or data["product_name"] == "") and "Hydrochloric acid" in original_text:
-            # Try to extract the proper product name
-            hcl_match = re.search(r"Hydrochloric acid\s*-\s*ACS reagent,\s*37%", original_text, re.IGNORECASE)
-            if hcl_match:
-                data["product_name"] = hcl_match.group(0).strip()
-            else:
-                # Simpler match
-                simple_match = re.search(r"Hydrochloric acid[^:\n]*", original_text)
-                if simple_match:
-                    data["product_name"] = simple_match.group(0).strip()
-                else:
-                    # Default value
-                    data["product_name"] = "Hydrochloric acid"
-    
-    # Ensure batch_number is same as lot_number if one is missing
-    if not data.get("batch_number") and data.get("lot_number"):
-        data["batch_number"] = data["lot_number"]
-    elif not data.get("lot_number") and data.get("batch_number"):
-        data["lot_number"] = data["batch_number"]
-
-def parse_coa_data(text):
-    """Enhanced COA parser that can handle multiple formats"""
-    data = {}
-    
-    # Preprocess text for better table handling
-    preprocessed_text = preprocess_text_for_tables(text)
-    
-    # 1. DOCUMENT TYPE & VENDOR DETECTION
-    # Detect document type and vendor to choose appropriate parsing strategy
-    coa_type = detect_coa_type(preprocessed_text)
-    data["document_type"] = coa_type.get("document_type", coa_type["type"])
-    data["supplier"] = coa_type["vendor"]
-    
-    # 2. DISPATCH TO FORMAT-SPECIFIC PARSERS
-    if coa_type["vendor"] == "Sigma-Aldrich":
-        extract_sigma_aldrich_data(preprocessed_text, data)
-    elif coa_type["vendor"] == "Z.D. CHEMIPAN" or "chemipan-benzene" in coa_type.get("document_type", ""):
-        # Handle CHEMIPAN Benzene COA format
-        extract_chemipan_benzene_data(preprocessed_text, data)
-        
-        # For CHEMIPAN Benzene documents, don't use generic extraction to avoid adding non-existent fields
-        validate_and_correct_data(data, preprocessed_text)
-        return data
-    else:
-        # Generic document handling
-        extract_common_metadata(preprocessed_text, data)
-        extract_generic_test_results(preprocessed_text, data)
-    
-    # 3. EXTRACT COMMON METADATA (fallback for any fields not found by vendor-specific parsers)
-    # Skip this for CHEMIPAN documents to avoid adding fields that don't exist
-    if coa_type["vendor"] != "Z.D. CHEMIPAN":
-        extract_common_metadata(preprocessed_text, data)
-    
-    # 4. VALIDATE AND CORRECT DATA
-    validate_and_correct_data(data, preprocessed_text)
-    
-    # Add a record ID for Alchemy integration (hardcoded to 51409 as per requirements)
-    data["_record_id"] = "51409"
-    data["_record_url"] = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/{data['_record_id']}"
-    
-    return data
-
-def refresh_alchemy_token():
-    """Refresh the Alchemy API token"""
-    global alchemy_token_cache
-    
-    current_time = time.time()
-    if (alchemy_token_cache["access_token"] and 
-        alchemy_token_cache["expires_at"] > current_time + 300):
-        logging.info("Using cached Alchemy token")
-        return alchemy_token_cache["access_token"]
-    
-    if not ALCHEMY_REFRESH_TOKEN:
-        logging.error("Missing ALCHEMY_REFRESH_TOKEN environment variable")
-        return None
+@app.route('/api/model-data')
+def get_model_data():
+    """API endpoint to get model data for the explorer interface"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
-        logging.info("Refreshing Alchemy API token")
-        response = requests.put(
-            ALCHEMY_REFRESH_URL, 
-            json={"refreshToken": ALCHEMY_REFRESH_TOKEN},
-            headers={"Content-Type": "application/json"}
-        )
+        # Force reload the model state from disk to get latest changes
+        try:
+            if hasattr(ai_processor, 'load_model_state'):
+                ai_processor.load_model_state()
+                logging.info("Reloaded model state from disk")
+        except Exception as e:
+            logging.warning(f"Unable to reload model state: {e}")
         
-        if not response.ok:
-            logging.error(f"Failed to refresh token. Status: {response.status_code}, Response: {response.text}")
-            return None
+        # Get model information - handle missing methods
+        document_schemas = {}
+        try:
+            if hasattr(ai_processor, 'get_document_schemas'):
+                document_schemas = ai_processor.get_document_schemas()
+            elif hasattr(ai_processor, 'document_schemas'):
+                document_schemas = ai_processor.document_schemas
+        except Exception as e:
+            logging.error(f"Error getting document schemas: {e}")
+            document_schemas = {
+                "sds": {"required_fields": ["product_name", "cas_number", "hazard_codes"]},
+                "tds": {"required_fields": ["product_name", "physical_properties"]},
+                "coa": {"required_fields": ["product_name", "batch_number", "lot_number", "purity"]}
+            }
         
-        data = response.json()
+        # Try to get training history, but handle case where method doesn't exist
+        training_history = []
+        try:
+            if hasattr(ai_processor, 'get_training_history'):
+                training_history = ai_processor.get_training_history()
+            elif hasattr(ai_processor, 'training_history'):
+                training_history = ai_processor.training_history
+        except Exception as e:
+            logging.warning(f"Unable to get training history: {e}")
         
-        # Find token for the specified tenant
-        tenant_token = next((token for token in data.get("tokens", []) 
-                            if token.get("tenant") == ALCHEMY_TENANT_NAME), None)
+        # Group training history by document type
+        history_by_type = {}
+        for entry in training_history:
+            doc_type = entry.get('doc_type', 'unknown')
+            if doc_type not in history_by_type:
+                history_by_type[doc_type] = []
+            history_by_type[doc_type].append(entry)
         
-        if not tenant_token:
-            logging.error(f"Tenant '{ALCHEMY_TENANT_NAME}' not found in refresh response")
-            return None
+        # Count fields trained for each document type
+        field_counts = {}
+        for doc_type, schema in document_schemas.items():
+            # Count fields from schema
+            required_fields = schema.get('required_fields', [])
+            field_counts[doc_type] = len(required_fields)
         
-        # Cache the token
-        access_token = tenant_token.get("accessToken")
-        expires_in = tenant_token.get("expiresIn", 3600)
+        # Build extraction examples
+        extraction_examples = {}
+        for doc_type, schema in document_schemas.items():
+            extraction_examples[doc_type] = {
+                "fields": schema.get("required_fields", []),
+                "examples": get_extraction_examples(doc_type)
+            }
         
-        alchemy_token_cache = {
-            "access_token": access_token,
-            "expires_at": current_time + expires_in
+        # Log the response for debugging
+        logging.info(f"Model data response: {len(document_schemas)} schemas, {len(training_history)} training events")
+        
+        return jsonify({
+            "status": "success",
+            "document_schemas": document_schemas,
+            "training_history": history_by_type,
+            "field_counts": field_counts,
+            "extraction_examples": extraction_examples,
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # Add timestamp for debugging
+        })
+    except Exception as e:
+        logging.error(f"Error getting model data: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def get_extraction_examples(doc_type):
+    """Get sample extraction patterns for the given document type"""
+    examples = {}
+    
+    if doc_type == "sds":
+        examples = {
+            "product_name": {
+                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
+                "example": "Product Name: Acetone"
+            },
+            "cas_number": {
+                "pattern": r"CAS\s+Number\s*[:.]\s*([0-9\-]+)",
+                "example": "CAS Number: 67-64-1"
+            },
+            "hazard_codes": {
+                "pattern": r"\b(H\d{3}[A-Za-z]?)\b",
+                "example": "Hazard Codes: H225, H319, H336"
+            }
         }
-        
-        logging.info(f"Successfully refreshed Alchemy token, expires in {expires_in} seconds")
-        return access_token
-        
-    except Exception as e:
-        logging.error(f"Error refreshing Alchemy token: {str(e)}")
-        return None
+    elif doc_type == "tds":
+        examples = {
+            "product_name": {
+                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
+                "example": "Product Name: TechBond Adhesive X-500"
+            },
+            "density": {
+                "pattern": r"(?:Density|Specific\s+Gravity)\s*[:.]\s*([\d.,]+\s*(?:g/cm3|kg/m3|g/mL))",
+                "example": "Density: 1.05 g/cm3"
+            },
+            "storage_conditions": {
+                "pattern": r"Storage(?:\s+conditions?)?\s*[:.]\s*([^\n]+)",
+                "example": "Storage conditions: Store at 5-25°C"
+            }
+        }
+    elif doc_type == "coa":
+        examples = {
+            "batch_number": {
+                "pattern": r"(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)",
+                "example": "Batch Number: ABC123"
+            },
+            "purity": {
+                "pattern": r"(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)",
+                "example": "Purity: 99.8%"
+            },
+            "test_results": {
+                "pattern": "Complex extraction logic",
+                "example": "Test Results: multiple fields extracted as objects"
+            }
+        }
+    
+    return examples
 
 # Route for File Extraction
 @app.route('/extract', methods=['POST'])
 def extract():
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
     # Check if the post request has the file part
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -775,9 +592,9 @@ def extract():
                     # Convert PDF to images with highly optimized settings
                     images = convert_from_path(
                         filepath,
-                        dpi=100,  # Very low DPI for speed
+                        dpi=100,  # Very low DPI for speed on free tier
                         first_page=1,
-                        last_page=1,  # Only process first page
+                        last_page=2,  # Only process first 2 pages for free tier
                         thread_count=1,  # Single thread to reduce memory
                         grayscale=True  # Grayscale for faster processing
                     )
@@ -785,7 +602,12 @@ def extract():
                     
                     # OCR the first page only
                     if images:
-                        text = pytesseract.image_to_string(images[0])
+                        text = ""
+                        for i, img in enumerate(images):
+                            if i >= 2:  # Limit to first 2 pages on free tier
+                                break
+                            page_text = pytesseract.image_to_string(img)
+                            text += f"--- Page {i+1} ---\n{page_text}\n\n"
                         logging.info(f"OCR completed in {time.time() - start_time:.2f} seconds")
                     else:
                         return jsonify({"error": "Failed to extract pages from PDF"}), 500
@@ -802,14 +624,36 @@ def extract():
             except Exception as e:
                 logging.warning(f"Failed to remove temp file: {e}")
             
-            # Parse data with enhanced parser
-            parsing_start = time.time()
-            logging.info("Parsing extracted text with enhanced parser")
-            data = parse_coa_data(text)
-            logging.info(f"Parsing completed in {time.time() - parsing_start:.2f} seconds")
+            # Use AI-based processing if available
+            if ai_processor is not None:
+                logging.info("Using AI Document Processor for enhanced extraction")
+                ai_start = time.time()
+                
+                try:
+                    # Process with AI
+                    ai_result = ai_processor.process_document(text)
+                    logging.info(f"AI processing completed in {time.time() - ai_start:.2f} seconds")
+                    
+                    # Convert AI result to format compatible with existing UI
+                    data = adapt_ai_result_to_legacy_format(ai_result)
+                    data['full_text'] = text
+                    
+                except Exception as e:
+                    logging.error(f"AI processing failed, falling back to legacy parser: {e}")
+                    # Fall back to legacy processing
+                    data = parse_coa_data(text)
+                    data['full_text'] = text
+            else:
+                # Use legacy processing
+                logging.info("Using legacy parser (AI not available)")
+                parsing_start = time.time()
+                data = parse_coa_data(text)
+                logging.info(f"Legacy parsing completed in {time.time() - parsing_start:.2f} seconds")
+                data['full_text'] = text
             
-            # Add the full text
-            data['full_text'] = text
+            # Add tenant information to the data
+            data['tenant'] = current_tenant
+            data['tenant_name'] = tenant_config['display_name']
             
             # Remove any record fields from the data to ensure they don't display
             if '_record_id' in data:
@@ -822,7 +666,8 @@ def extract():
                 "data": data,
                 "internal": {
                     "record_id": "51409",
-                    "record_url": f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409"
+                    "record_url": f"{tenant_config['base_url']}{tenant_config['tenant_name']}/record/51409",
+                    "tenant": current_tenant
                 }
             }
             
@@ -843,9 +688,346 @@ def extract():
     
     return jsonify({"error": "File type not allowed"}), 400
 
+# Route for Training the AI
+@app.route('/train', methods=['POST'])
+def train():
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+        
+    if 'file' not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+        
+    file = request.files['file']
+    doc_type = request.form.get('doc_type', 'unknown')
+    annotations_json = request.form.get('annotations', '{}')
+    
+    try:
+        annotations = json.loads(annotations_json)
+    except:
+        annotations = {}
+        
+    if file.filename == '':
+        return jsonify({"status": "error", "message": "No selected file"}), 400
+        
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        unique_filename = f"{uuid.uuid4()}_{filename}"
+        filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
+        
+        try:
+            # Save the file
+            file.save(filepath)
+            
+            # Extract text from file
+            if filepath.lower().endswith('.pdf'):
+                text = extract_text_from_pdf_without_ocr(filepath) or ""
+                if not text:
+                    # Convert just first page for training
+                    images = convert_from_path(filepath, dpi=150, first_page=1, last_page=1)
+                    if images:
+                        text = pytesseract.image_to_string(images[0])
+                    else:
+                        return jsonify({"status": "error", "message": "Failed to extract text from PDF"}), 500
+            else:
+                # Process image
+                img = Image.open(filepath)
+                text = pytesseract.image_to_string(img)
+            
+            # Clean up file
+            try:
+                os.remove(filepath)
+            except:
+                pass
+                
+            # Train AI processor with extracted text
+            result = ai_processor.train_from_example(text, doc_type, annotations)
+            return jsonify(result)
+            
+        except Exception as e:
+            logging.error(f"Error in training: {e}")
+            # Clean up file on error
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            return jsonify({"status": "error", "message": str(e)}), 500
+            
+    return jsonify({"status": "error", "message": "File type not allowed"}), 400
+
+# Admin Routes
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    """Admin login page"""
+    error = None
+    
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if authenticate(username, password):
+            # Set session as authenticated
+            session['admin_authenticated'] = True
+            session['last_activity'] = datetime.utcnow().isoformat()
+            session.permanent = True  # Use the permanent session lifetime
+            
+            # Redirect to the admin panel
+            return redirect(url_for('admin_panel'))
+        else:
+            error = "Invalid credentials. Please try again."
+    
+    return render_template('admin_login.html', error=error)
+
+@app.route('/admin/logout')
+def admin_logout():
+    """Admin logout"""
+    session.pop('admin_authenticated', None)
+    session.pop('last_activity', None)
+    return redirect(url_for('admin_login'))
+
+@app.route('/admin', methods=['GET'])
+def admin_panel():
+    """Admin panel to manage tenants"""
+    return render_template('admin.html', tenants=CONFIG["tenants"], default_tenant=DEFAULT_TENANT)
+
+# Configuration Management Routes
+@app.route('/api/update-tenant-token', methods=['POST'])
+def update_tenant_token():
+    """Update refresh token for a tenant directly in the config"""
+    try:
+        data = request.json
+        if not data or 'tenant_id' not in data or 'refresh_token' not in data:
+            return jsonify({
+                "status": "error", 
+                "message": "Missing tenant_id or refresh_token"
+            }), 400
+            
+        tenant_id = data['tenant_id']
+        refresh_token = data['refresh_token']
+        
+        # Check if tenant exists
+        if tenant_id not in CONFIG["tenants"]:
+            return jsonify({
+                "status": "error", 
+                "message": f"Tenant {tenant_id} not found"
+            }), 404
+        
+        # Verify token by calling Alchemy's token validation/refresh endpoint
+        try:
+            response = requests.put(
+                DEFAULT_URLS['refresh_url'], 
+                json={"refreshToken": refresh_token},
+                headers={"Content-Type": "application/json"}
+            )
+            
+            # Log full response details
+            logging.info(f"Token verification response status: {response.status_code}")
+            
+            # If response is not successful, log the full text
+            if not response.ok:
+                logging.error(f"Token verification failed. Response text: {response.text}")
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Token verification failed: {response.text}"
+                }), 400
+        except Exception as verify_error:
+            logging.error(f"Error verifying token: {verify_error}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Token verification error: {str(verify_error)}"
+            }), 500
+        
+        # Update token in config
+        try:
+            # Directly modify the global CONFIG
+            CONFIG["tenants"][tenant_id]["stored_refresh_token"] = refresh_token
+            
+            # Attempt to save configuration
+            save_result = save_config(CONFIG)
+            
+            if not save_result:
+                logging.error(f"Failed to save configuration for tenant {tenant_id}")
+                return jsonify({
+                    "status": "error", 
+                    "message": "Failed to save configuration"
+                }), 500
+        except Exception as config_error:
+            logging.error(f"Error updating configuration: {config_error}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Configuration update error: {str(config_error)}"
+            }), 500
+        
+        # Clear the token cache for this tenant
+        if tenant_id in token_cache:
+            del token_cache[tenant_id]
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Refresh token updated for tenant {tenant_id}"
+        })
+        
+    except Exception as e:
+        logging.error(f"Unexpected error updating tenant token: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/admin/add-tenant', methods=['POST'])
+def add_tenant():
+    """Add a new tenant to the configuration"""
+    try:
+        tenant_id = request.form.get('tenant_id')
+        tenant_name = request.form.get('tenant_name')
+        display_name = request.form.get('display_name')
+        description = request.form.get('description', '')
+        button_class = request.form.get('button_class', 'primary')
+        env_token_var = request.form.get('env_token_var')
+        use_custom_urls = request.form.get('use_custom_urls') == 'on'
+        
+        # Validate input
+        if not tenant_id or not tenant_name or not display_name or not env_token_var:
+            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+        
+        # Check if tenant already exists
+        if tenant_id in CONFIG["tenants"]:
+            return jsonify({"status": "error", "message": f"Tenant {tenant_id} already exists"}), 400
+        
+        # Create tenant config
+        new_tenant = {
+            "tenant_name": tenant_name,
+            "display_name": display_name,
+            "description": description,
+            "button_class": button_class,
+            "env_token_var": env_token_var,
+            "use_custom_urls": use_custom_urls
+        }
+        
+        # Add custom URLs if needed
+        if use_custom_urls:
+            new_tenant["custom_urls"] = {
+                "refresh_url": request.form.get('refresh_url', DEFAULT_URLS["refresh_url"]),
+                "api_url": request.form.get('api_url', DEFAULT_URLS["api_url"]),
+                "filter_url": request.form.get('filter_url', DEFAULT_URLS["filter_url"]),
+                "find_records_url": request.form.get('find_records_url', DEFAULT_URLS["find_records_url"]),
+                "base_url": request.form.get('base_url', DEFAULT_URLS["base_url"])
+            }
+        
+        # Update configuration in memory
+        CONFIG["tenants"][tenant_id] = new_tenant
+        
+        # Save configuration to file
+        save_config(CONFIG)
+        
+        return jsonify({"status": "success", "message": f"Tenant {display_name} added successfully"})
+    except Exception as e:
+        logging.error(f"Error adding tenant: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/admin/update-tenant/<tenant_id>', methods=['POST'])
+def update_tenant(tenant_id):
+    """Update an existing tenant"""
+    try:
+        # Check if tenant exists
+        if tenant_id not in CONFIG["tenants"]:
+            return jsonify({"status": "error", "message": f"Tenant {tenant_id} not found"}), 404
+        
+        tenant_name = request.form.get('tenant_name')
+        display_name = request.form.get('display_name')
+        description = request.form.get('description', '')
+        button_class = request.form.get('button_class', 'primary')
+        env_token_var = request.form.get('env_token_var')
+        use_custom_urls = request.form.get('use_custom_urls') == 'on'
+        
+        # Validate input
+        if not tenant_name or not display_name or not env_token_var:
+            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+        
+        # Update tenant config
+        CONFIG["tenants"][tenant_id].update({
+            "tenant_name": tenant_name,
+            "display_name": display_name,
+            "description": description,
+            "button_class": button_class,
+            "env_token_var": env_token_var,
+            "use_custom_urls": use_custom_urls
+        })
+        
+        # Update custom URLs if needed
+        if use_custom_urls:
+            CONFIG["tenants"][tenant_id]["custom_urls"] = {
+                "refresh_url": request.form.get('refresh_url', DEFAULT_URLS["refresh_url"]),
+                "api_url": request.form.get('api_url', DEFAULT_URLS["api_url"]),
+                "filter_url": request.form.get('filter_url', DEFAULT_URLS["filter_url"]),
+                "find_records_url": request.form.get('find_records_url', DEFAULT_URLS["find_records_url"]),
+                "base_url": request.form.get('base_url', DEFAULT_URLS["base_url"])
+            }
+        elif "custom_urls" in CONFIG["tenants"][tenant_id]:
+            del CONFIG["tenants"][tenant_id]["custom_urls"]
+        
+        # Save configuration to file
+        save_config(CONFIG)
+        
+        return jsonify({"status": "success", "message": f"Tenant {display_name} updated successfully"})
+    except Exception as e:
+        logging.error(f"Error updating tenant: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/admin/delete-tenant/<tenant_id>', methods=['POST'])
+def delete_tenant(tenant_id):
+    """Delete a tenant"""
+    try:
+        # Check if tenant exists
+        if tenant_id not in CONFIG["tenants"]:
+            return jsonify({"status": "error", "message": f"Tenant {tenant_id} not found"}), 404
+        
+        # Can't delete default tenant
+        if tenant_id == DEFAULT_TENANT:
+            return jsonify({"status": "error", "message": "Cannot delete default tenant"}), 400
+        
+        # Delete tenant
+        display_name = CONFIG["tenants"][tenant_id].get("display_name", tenant_id)
+        del CONFIG["tenants"][tenant_id]
+        
+        # Save configuration to file
+        save_config(CONFIG)
+        
+        return jsonify({"status": "success", "message": f"Tenant {display_name} deleted successfully"})
+    except Exception as e:
+        logging.error(f"Error deleting tenant: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/get-refresh-token', methods=['POST'])
+def get_refresh_token():
+    """Proxy for Alchemy sign-in API to get refresh tokens"""
+    try:
+        # Get credentials from request
+        data = request.json
+        if not data or 'email' not in data or 'password' not in data:
+            return jsonify({"status": "error", "message": "Missing email or password"}), 400
+            
+        # Forward the request to Alchemy API
+        alchemy_response = requests.post(
+            'https://core-production.alchemy.cloud/core/api/v2/sign-in',
+            json={
+                "email": data['email'],
+                "password": data['password']
+            },
+            headers={"Content-Type": "application/json"}
+        )
+        
+        # Return the response directly
+        return alchemy_response.json(), alchemy_response.status_code
+            
+    except Exception as e:
+        logging.error(f"Error getting refresh token: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 # Route for Sending Data to Alchemy
 @app.route('/send-to-alchemy', methods=['POST'])
 def send_to_alchemy():
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
     data = request.json
     
     if not data:
@@ -860,18 +1042,21 @@ def send_to_alchemy():
             
             # Get record ID and URL from internal data
             record_id = internal_data.get('record_id', "51409")
-            record_url = internal_data.get('record_url', f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409")
+            record_url = internal_data.get('record_url', f"{tenant_config['base_url']}{tenant_config['tenant_name']}/record/51409")
         except:
             # Fallback if something went wrong
             extracted_data = data.get('data', {})
             record_id = "51409"
-            record_url = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/51409"
+            record_url = f"{tenant_config['base_url']}{tenant_config['tenant_name']}/record/51409"
         
-        # Format purity value - extract just the numeric part
-        purity_value = format_purity_value(extracted_data.get('purity', ""))
+        # Format data for Alchemy API (customize this based on your needs)
+        product_name = extracted_data.get('product_name', "Unknown Product")
+        cas_number = extracted_data.get('cas_number', "")
+        purity = extracted_data.get('purity', "")
+        lot_number = extracted_data.get('lot_number', "")
         
         # Get a fresh access token from Alchemy
-        access_token = refresh_alchemy_token()
+        access_token = refresh_alchemy_token(current_tenant)
         
         if not access_token:
             return jsonify({
@@ -879,7 +1064,7 @@ def send_to_alchemy():
                 "message": "Failed to authenticate with Alchemy API"
             }), 500
         
-        # Format data for Alchemy API - exactly matching the Postman structure
+        # Format data for Alchemy API - match the structure expected by your Alchemy templates
         alchemy_payload = [
             {
                 "processId": None,
@@ -892,7 +1077,7 @@ def send_to_alchemy():
                                 "row": 0,
                                 "values": [
                                     {
-                                        "value": extracted_data.get('product_name', "Unknown Product"),
+                                        "value": product_name,
                                         "valuePreview": ""
                                     }
                                 ]
@@ -906,7 +1091,7 @@ def send_to_alchemy():
                                 "row": 0,
                                 "values": [
                                     {
-                                        "value": extracted_data.get('cas_number', ""),
+                                        "value": cas_number,
                                         "valuePreview": ""
                                     }
                                 ]
@@ -920,7 +1105,7 @@ def send_to_alchemy():
                                 "row": 0,
                                 "values": [
                                     {
-                                        "value": purity_value,
+                                        "value": purity,
                                         "valuePreview": ""
                                     }
                                 ]
@@ -934,7 +1119,7 @@ def send_to_alchemy():
                                 "row": 0,
                                 "values": [
                                     {
-                                        "value": extracted_data.get('lot_number', ""),
+                                        "value": lot_number,
                                         "valuePreview": ""
                                     }
                                 ]
@@ -952,7 +1137,7 @@ def send_to_alchemy():
         }
         
         logging.info(f"Sending data to Alchemy: {json.dumps(alchemy_payload)}")
-        response = requests.post(ALCHEMY_API_URL, headers=headers, json=alchemy_payload)
+        response = requests.post(tenant_config['api_url'], headers=headers, json=alchemy_payload)
         
         # Log response for debugging
         logging.info(f"Alchemy API response status code: {response.status_code}")
@@ -962,8 +1147,6 @@ def send_to_alchemy():
         response.raise_for_status()
         
         # Try to extract the record ID from the response
-        record_id = None
-        record_url = None
         try:
             response_data = response.json()
             # Extract record ID from response - adjust this based on actual response structure
@@ -985,7 +1168,7 @@ def send_to_alchemy():
             
             # If record ID was found, construct the URL
             if record_id:
-                record_url = f"https://app.alchemy.cloud/{ALCHEMY_TENANT_NAME}/record/{record_id}"
+                record_url = f"{tenant_config['base_url']}{tenant_config['tenant_name']}/record/{record_id}"
                 logging.info(f"Created record URL: {record_url}")
             
         except Exception as e:
@@ -1023,6 +1206,85 @@ def send_to_alchemy():
             "status": "error", 
             "message": str(e)
         }), 500
+
+# Legacy Data Processing Functions (assuming these exist or need to be implemented)
+def adapt_ai_result_to_legacy_format(ai_result):
+    """Convert AI processor result to format expected by the UI"""
+    # Implementation depends on your AI processor output format
+    # This is a placeholder - customize based on your actual needs
+    data = {
+        "document_type": ai_result.get("document_type", "unknown"),
+        "full_text": ai_result.get("full_text", "")
+    }
+    
+    # Map entities to flat structure expected by frontend
+    entities = ai_result.get("entities", {})
+    for key, value in entities.items():
+        if isinstance(value, list) and key not in ["chemicals", "hazard_codes"]:
+            data[key] = ", ".join(value)
+        else:
+            data[key] = value
+    
+    # Add document-type-specific processing
+    doc_type = ai_result.get("document_type")
+    if doc_type == "coa" and "test_results" in entities:
+        data["test_results"] = entities["test_results"]
+    
+    return data
+
+def parse_coa_data(text):
+    """Parse COA text without AI - legacy fallback"""
+    # Implementation depends on your legacy parsing needs
+    # This is a placeholder - customize based on your actual needs
+    data = {
+        "document_type": "unknown",
+        "full_text": text
+    }
+    
+    # Look for COA indicators
+    if re.search(r"certificate\s+of\s+analysis", text, re.IGNORECASE):
+        data["document_type"] = "coa"
+        
+        # Extract basic fields
+        product_match = re.search(r"Product\s+Name\s*[:.]\s*([^\n]+)", text, re.IGNORECASE)
+        if product_match:
+            data["product_name"] = product_match.group(1).strip()
+            
+        lot_match = re.search(r"(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+        if lot_match:
+            data["lot_number"] = lot_match.group(1).strip()
+            
+        purity_match = re.search(r"(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)", text, re.IGNORECASE)
+        if purity_match:
+            data["purity"] = purity_match.group(1).strip()
+    
+    # Look for SDS indicators
+    elif re.search(r"(?:safety\s+data\s+sheet|material\s+safety\s+data\s+sheet|msds)", text, re.IGNORECASE):
+        data["document_type"] = "sds"
+        
+        # Extract basic fields
+        product_match = re.search(r"Product\s+Name\s*[:.]\s*([^\n]+)", text, re.IGNORECASE)
+        if product_match:
+            data["product_name"] = product_match.group(1).strip()
+            
+        cas_match = re.search(r"CAS\s+(?:Number|No|#)\s*[:.]\s*([0-9\-]+)", text, re.IGNORECASE)
+        if cas_match:
+            data["cas_number"] = cas_match.group(1).strip()
+    
+    # Look for TDS indicators
+    elif re.search(r"(?:technical\s+data\s+sheet|product\s+specification)", text, re.IGNORECASE):
+        data["document_type"] = "tds"
+        
+        # Extract basic fields
+        product_match = re.search(r"Product\s+Name\s*[:.]\s*([^\n]+)", text, re.IGNORECASE)
+        if product_match:
+            data["product_name"] = product_match.group(1).strip()
+            
+        density_match = re.search(r"(?:Density|Specific\s+Gravity)\s*[:.]\s*([\d.,]+\s*(?:g/cm3|kg/m3|g/mL))", text, re.IGNORECASE)
+        if density_match:
+            data["density"] = density_match.group(1).strip()
+    
+    return data
 
 # Main Application Runner
 if __name__ == '__main__':

@@ -490,7 +490,7 @@ class AIDocumentProcessor:
             for pattern in density_patterns:
                 density_match = re.search(pattern, text)
                 if density_match:
-                entities['density'] = density_match.group(1).strip()
+                    entities['density'] = density_match.group(1).strip()
                     break  # Add this to stop after the first match
             
             

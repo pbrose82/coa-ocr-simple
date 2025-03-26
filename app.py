@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Third-party imports
 from flask import Flask, request, jsonify, render_template, send_from_directory
-from flask import redirect, url_for, Response, session
+from flask import redirect, url_for, Response, session, flash
 import requests
 from werkzeug.utils import secure_filename
 from PIL import Image
@@ -69,6 +69,19 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))
 
 # Set session timeout (1 hour)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+
+# Enhanced session configuration
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
+app.config['SESSION_FILE_THRESHOLD'] = 500  # Maximum number of sessions in session dir
+app.config['SESSION_PERMANENT'] = True
+app.config['SESSION_USE_SIGNER'] = True  # Add this for extra security
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Restrict cookie sending to same site
+
+# Create session directory if it doesn't exist
+os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
 
 # Configuration Constants
 UPLOAD_FOLDER = '/tmp'
@@ -429,6 +442,39 @@ def extract_text_from_pdf_without_ocr(pdf_path):
         logging.error(f"Error extracting text directly from PDF: {e}")
         return None
 
+def extract_text_from_file(filepath):
+    """Extract text from a file based on its type"""
+    if filepath.lower().endswith('.pdf'):
+        # Try direct extraction first
+        text = extract_text_from_pdf_without_ocr(filepath)
+        
+        if text and len(text.strip()) > 100:
+            return text
+        
+        # Fall back to OCR
+        images = convert_from_path(
+            filepath,
+            dpi=150,
+            first_page=1,
+            last_page=5,  # Limit to first 5 pages
+            thread_count=1,
+            grayscale=True
+        )
+        
+        if not images:
+            raise Exception("Failed to extract pages from PDF")
+            
+        text = ""
+        for i, img in enumerate(images):
+            page_text = pytesseract.image_to_string(img)
+            text += f"--- Page {i+1} ---\n{page_text}\n\n"
+            
+        return text
+    else:
+        # For image files, use OCR
+        img = Image.open(filepath)
+        return pytesseract.image_to_string(img)
+
 def preprocess_text_for_tables(text):
     """Preprocess text to better handle table structures"""
     lines = text.split('\n')
@@ -443,12 +489,123 @@ def preprocess_text_for_tables(text):
     
     return "\n".join(processed_lines)
 
+def extract_tabular_data(text):
+    """Extract data from table-like structures in COA documents"""
+    table_data = {}
+    
+    # Look for table headers
+    header_pattern = r'(?i)(?:Test|Parameter|Property)\s+(?:Method|Standard)?\s+(?:Unit|Units)?\s+(?:Specification|Spec|Limit)s?\s+(?:Result|Value)'
+    if re.search(header_pattern, text):
+        logging.info("Table header found, attempting to parse table rows")
+        
+        # Parse rows that look like table data
+        row_pattern = r'(?im)^([A-Za-z\s@]+)\s+([A-Z0-9\s]+)\s+([a-z/%]+)\s+([0-9.-]+(?:\s+[0-9.-]+)?)\s+([0-9.-]+(?:\s+[A-Za-z0-9.]+)?)'
+        
+        for match in re.finditer(row_pattern, text):
+            parameter = match.group(1).strip()
+            method = match.group(2).strip()
+            unit = match.group(3).strip()
+            spec = match.group(4).strip()
+            result = match.group(5).strip()
+            
+            # Store in normalized format
+            parameter_key = parameter.lower().replace(' ', '_')
+            table_data[parameter_key] = {
+                'method': method,
+                'unit': unit,
+                'specification': spec,
+                'result': result
+            }
+            logging.info(f"Extracted table row: {parameter} = {result}")
+    else:
+        # Try alternative table format
+        alt_header = r'(?i)(?:Parameter|Property|Test)\s+(?:Value|Result)'
+        if re.search(alt_header, text):
+            logging.info("Alternative table format detected")
+            alt_row_pattern = r'(?im)^([A-Za-z\s@]+)\s+([0-9.-]+(?:\s+[A-Za-z0-9.]+)?)'
+            
+            for match in re.finditer(alt_row_pattern, text):
+                parameter = match.group(1).strip()
+                result = match.group(2).strip()
+                
+                parameter_key = parameter.lower().replace(' ', '_')
+                table_data[parameter_key] = {
+                    'result': result
+                }
+    
+    return table_data
+
+# Template Management Functions
+def save_document_template(tenant_id, template_name, doc_type, field_mappings, sample_text=None):
+    """Save a document template for future use"""
+    # Create templates directory if it doesn't exist
+    templates_dir = os.path.join(MODEL_STATE_DIR, 'templates')
+    os.makedirs(templates_dir, exist_ok=True)
+    
+    # Template file path
+    template_file = os.path.join(templates_dir, f"{tenant_id}_templates.json")
+    
+    # Load existing templates
+    templates = []
+    if os.path.exists(template_file):
+        try:
+            with open(template_file, 'r') as f:
+                templates = json.load(f)
+        except Exception as e:
+            logging.error(f"Error loading templates: {e}")
+    
+    # Create new template
+    template_id = str(uuid.uuid4())
+    new_template = {
+        "id": template_id,
+        "name": template_name,
+        "doc_type": doc_type,
+        "field_mappings": field_mappings,
+        "created_at": datetime.now().isoformat(),
+        "sample_excerpt": sample_text[:200] if sample_text else None
+    }
+    
+    # Add to templates
+    templates.append(new_template)
+    
+    # Save templates
+    try:
+        with open(template_file, 'w') as f:
+            json.dump(templates, f, indent=2)
+        logging.info(f"Template '{template_name}' saved for tenant {tenant_id}")
+        return True
+    except Exception as e:
+        logging.error(f"Error saving template: {e}")
+        return False
+
+def get_document_templates(tenant_id):
+    """Get document templates for a tenant"""
+    templates_dir = os.path.join(MODEL_STATE_DIR, 'templates')
+    template_file = os.path.join(templates_dir, f"{tenant_id}_templates.json")
+    
+    if os.path.exists(template_file):
+        try:
+            with open(template_file, 'r') as f:
+                templates = json.load(f)
+            return templates
+        except Exception as e:
+            logging.error(f"Error loading templates: {e}")
+    
+    return []
+
 # Authentication for admin routes
 def authenticate(username, password):
-    """Validate admin credentials"""
-    admin_username = os.getenv('ADMIN_USERNAME', 'admin')
-    admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
-    return username == admin_username and password == admin_password
+    """Validate admin credentials with enhanced logging"""
+    admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
+    admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+    
+    logging.info(f"Auth attempt - Input username: '{username}', Expected username: '{admin_username}'")
+    logging.info(f"Using default credentials: {admin_username == 'admin'}")
+    
+    auth_result = username == admin_username and password == admin_password
+    logging.info(f"Authentication result: {auth_result}")
+    
+    return auth_result
 
 @app.before_request
 def require_auth():
@@ -460,6 +617,9 @@ def require_auth():
         # Skip authentication for the login page itself
         if request.path == '/admin/login':
             return None
+            
+        # Debug session state
+        logging.info(f"Admin route access: {request.path}, Session: {dict(session)}")
             
         # Check if user is already authenticated and session is still valid
         if 'admin_authenticated' in session and session['admin_authenticated']:
@@ -477,6 +637,7 @@ def require_auth():
             return None
         else:
             # Not authenticated, redirect to login page
+            logging.warning(f"Unauthenticated access to admin route: {request.path}")
             return redirect(url_for('admin_login'))
 
 # Load configuration
@@ -685,58 +846,6 @@ def get_model_data():
         logging.error(f"Error getting model data: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def get_extraction_examples(doc_type):
-    """Get sample extraction patterns for the given document type"""
-    examples = {}
-    
-    if doc_type == "sds":
-        examples = {
-            "product_name": {
-                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
-                "example": "Product Name: Acetone"
-            },
-            "cas_number": {
-                "pattern": r"CAS\s+Number\s*[:.]\s*([0-9\-]+)",
-                "example": "CAS Number: 67-64-1"
-            },
-            "hazard_codes": {
-                "pattern": r"\b(H\d{3}[A-Za-z]?)\b",
-                "example": "Hazard Codes: H225, H319, H336"
-            }
-        }
-    elif doc_type == "tds":
-        examples = {
-            "product_name": {
-                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
-                "example": "Product Name: TechBond Adhesive X-500"
-            },
-            "density": {
-                "pattern": r"(?:Density|Specific\s+Gravity)\s*[:.]\s*([\d.,]+\s*(?:g/cm3|kg/m3|g/mL))",
-                "example": "Density: 1.05 g/cm3"
-            },
-            "storage_conditions": {
-                "pattern": r"Storage(?:\s+conditions?)?\s*[:.]\s*([^\n]+)",
-                "example": "Storage conditions: Store at 5-25°C"
-            }
-        }
-    elif doc_type == "coa":
-        examples = {
-            "batch_number": {
-                "pattern": r"(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)",
-                "example": "Batch Number: ABC123"
-            },
-            "purity": {
-                "pattern": r"(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)",
-                "example": "Purity: 99.8%"
-            },
-            "test_results": {
-                "pattern": "Complex extraction logic",
-                "example": "Test Results: multiple fields extracted as objects"
-            }
-        }
-    
-    return examples
-
 @app.route('/extract', methods=['POST'])
 def extract():
     # Get current tenant from session or use default
@@ -878,7 +987,6 @@ def extract():
             return jsonify({"error": str(e)}), 500
     
     return jsonify({"error": "File type not allowed"}), 400
-
 
 @app.route('/api/update-pattern', methods=['POST'])
 def update_pattern():
@@ -1038,26 +1146,338 @@ def train():
             
     return jsonify({"status": "error", "message": "File type not allowed"}), 400     
 
+@app.route('/visual-training', methods=['GET', 'POST'])
+def visual_training():
+    """Visual training interface"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    if request.method == 'POST':
+        # Get the document text from form data or file
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and allowed_file(file.filename):
+                # Process the file to extract text
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}_{filename}")
+                
+                try:
+                    # Save and process the file
+                    file.save(filepath)
+                    document_text = extract_text_from_file(filepath)
+                    
+                    # Clean up
+                    os.remove(filepath)
+                    
+                    # Store in session for the visual training page
+                    session['document_text'] = document_text
+                    
+                    # Redirect to visual training with the text
+                    return redirect(url_for('visual_training'))
+                except Exception as e:
+                    logging.error(f"Error processing file: {e}")
+                    flash(f"Error processing file: {e}", "error")
+                    return redirect(url_for('training'))
+        else:
+            # Direct text input
+            document_text = request.form.get('document_text', '')
+            session['document_text'] = document_text
+            return redirect(url_for('visual_training'))
+    
+    # GET request - show the visual training interface
+    document_text = session.get('document_text', '')
+    if not document_text:
+        # No text to process, redirect to training page
+        return redirect(url_for('training'))
+    
+    return render_template('visual_training.html', 
+                          document_text=document_text,
+                          tenant=current_tenant,
+                          tenant_name=tenant_config['display_name'])
+
+@app.route('/api/train-visual', methods=['POST'])
+def train_visual():
+    """API endpoint to process visual training data"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "No data provided"}), 400
+            
+        doc_type = data.get('doc_type')
+        field_mappings = data.get('field_mappings', {})
+        document_text = data.get('document_text', '')
+        save_as_template = data.get('save_as_template', False)
+        template_name = data.get('template_name', '')
+        
+        if not doc_type or not field_mappings or not document_text:
+            return jsonify({
+                "status": "error", 
+                "message": "Missing required fields (doc_type, field_mappings, document_text)"
+            }), 400
+            
+        # Prepare annotations for training
+        annotations = {
+            "field_mappings": field_mappings
+        }
+        
+        # Train the model with extracted text and annotations
+        result = tenant_processor.train_from_example(document_text, doc_type, annotations)
+        
+        # Save the model state
+        tenant_processor.save_model_state()
+        
+        # If saving as a template, store the template
+        if save_as_template and template_name:
+            save_document_template(current_tenant, template_name, doc_type, field_mappings, document_text)
+        
+        # Clear the document text from session
+        if 'document_text' in session:
+            session.pop('document_text')
+        
+        return jsonify({
+            "status": "success",
+            "message": "Training completed successfully",
+            "training_result": result
+        })
+    except Exception as e:
+        logging.error(f"Error in visual training: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/templates')
+def template_management():
+    """Document templates management page"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    # Get templates for this tenant
+    templates = get_document_templates(current_tenant)
+    
+    return render_template('template_management.html',
+                          templates=templates, 
+                          tenant=current_tenant,
+                          tenant_name=tenant_config['display_name'])
+
+@app.route('/apply-template/<template_id>', methods=['GET', 'POST'])
+def apply_template(template_id):
+    """Apply a template to a document"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    # Get templates for this tenant
+    templates = get_document_templates(current_tenant)
+    
+    # Find the requested template
+    template = next((t for t in templates if t['id'] == template_id), None)
+    if not template:
+        flash('Template not found', 'error')
+        return redirect(url_for('template_management'))
+    
+    if request.method == 'POST':
+        # Check if a file was uploaded
+        if 'file' not in request.files:
+            flash('No file selected', 'error')
+            return redirect(request.url)
+            
+        file = request.files['file']
+        if file.filename == '':
+            flash('No file selected', 'error')
+            return redirect(request.url)
+            
+        if file and allowed_file(file.filename):
+            # Process the file
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}_{filename}")
+            
+            try:
+                # Save the file
+                file.save(filepath)
+                
+                # Extract text
+                text = extract_text_from_file(filepath)
+                
+                # Get tenant-specific processor
+                tenant_processor = get_tenant_processor(current_tenant)
+                
+                # Apply template-based training first
+                annotations = {
+                    "field_mappings": template['field_mappings']
+                }
+                tenant_processor.train_from_example(text, template['doc_type'], annotations)
+                
+                # Now process the document
+                result = tenant_processor.process_document(text)
+                
+                # Clean up
+                os.remove(filepath)
+                
+                # Convert to format expected by frontend
+                processed_data = adapt_ai_result_to_legacy_format(result)
+                processed_data['full_text'] = text
+                
+                # Store for display
+                session['extraction_result'] = processed_data
+                
+                # Redirect to results page
+                return redirect(url_for('show_template_results'))
+                
+            except Exception as e:
+                logging.error(f"Error processing template: {e}")
+                flash(f"Error processing document: {e}", 'error')
+                return redirect(request.url)
+    
+    # GET request - show the template application page
+    return render_template('apply_template.html',
+                          template=template,
+                          tenant=current_tenant,
+                          tenant_name=tenant_config['display_name'])
+
+@app.route('/template-results')
+def show_template_results():
+    """Show results from template-based extraction"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    # Get extraction result from session
+    result = session.get('extraction_result')
+    if not result:
+        flash('No extraction results available', 'error')
+        return redirect(url_for('template_management'))
+    
+    return render_template('template_results.html',
+                          result=result,
+                          tenant=current_tenant,
+                          tenant_name=tenant_config['display_name'])
+
+@app.route('/api/verify-persistence', methods=['GET'])
+def verify_persistence():
+    """Verify that model persistence is working correctly"""
+    try:
+        model_dir = MODEL_STATE_DIR
+        test_file = os.path.join(model_dir, 'persistence_test.pkl')
+        test_data = {"test": True, "timestamp": datetime.now().isoformat()}
+        
+        # Test directory permissions
+        dir_exists = os.path.exists(model_dir)
+        dir_writable = os.access(model_dir, os.W_OK) if dir_exists else False
+        
+        # Create directory if it doesn't exist
+        if not dir_exists:
+            try:
+                os.makedirs(model_dir, exist_ok=True)
+                dir_exists = os.path.exists(model_dir)
+                dir_writable = os.access(model_dir, os.W_OK)
+            except Exception as e:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Failed to create model directory: {e}",
+                    "step": "directory_creation"
+                }), 500
+        
+        # Check if we can write to the directory
+        if not dir_writable:
+            return jsonify({
+                "status": "error",
+                "message": "Model directory exists but is not writable",
+                "step": "permission_check",
+                "dir": model_dir
+            }), 500
+        
+        # Try to write a test file
+        try:
+            with open(test_file, 'wb') as f:
+                pickle.dump(test_data, f)
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to write test file: {e}",
+                "step": "write_test"
+            }), 500
+        
+        # Try to read the test file
+        try:
+            with open(test_file, 'rb') as f:
+                loaded_data = pickle.load(f)
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to read test file: {e}",
+                "step": "read_test"
+            }), 500
+        
+        # List all model files
+        try:
+            model_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
+        except Exception as e:
+            model_files = [f"Error listing files: {e}"]
+        
+        # Return success
+        return jsonify({
+            "status": "success",
+            "message": "Model persistence is working correctly",
+            "test_data": loaded_data,
+            "directory": {
+                "path": model_dir,
+                "exists": dir_exists,
+                "writable": dir_writable
+            },
+            "model_files": model_files
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Verification failed: {e}",
+            "step": "general"
+        }), 500
+
 # Admin Routes
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
-    """Admin login page"""
+    """Admin login page with enhanced logging"""
     error = None
+    
+    # Log access to this route
+    logging.info(f"Admin login route accessed, method: {request.method}, IP: {request.remote_addr}")
+    
+    # Debug session state
+    logging.info(f"Current session state: {dict(session)}")
     
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         
-        if authenticate(username, password):
+        # Check environment variables directly
+        admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
+        admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+        
+        logging.info(f"Login attempt with username: {username}")
+        logging.info(f"Expected username from env: {admin_username}")
+        logging.info(f"Using default credentials: {admin_username == 'admin'}")
+        
+        if username == admin_username and password == admin_password:
             # Set session as authenticated
+            session.clear()  # Clear any existing session data
             session['admin_authenticated'] = True
             session['last_activity'] = datetime.utcnow().isoformat()
-            session.permanent = True  # Use the permanent session lifetime
+            session.permanent = True
+            
+            logging.info(f"Authentication successful, session: {dict(session)}")
             
             # Redirect to the admin panel
             return redirect(url_for('admin_panel'))
         else:
             error = "Invalid credentials. Please try again."
+            logging.warning(f"Authentication failed for username: {username}")
     
     return render_template('admin_login.html', error=error)
 
@@ -1070,7 +1490,14 @@ def admin_logout():
 
 @app.route('/admin', methods=['GET'])
 def admin_panel():
-    """Admin panel to manage tenants"""
+    """Admin panel with explicit auth check"""
+    logging.info(f"Admin panel accessed, session: {dict(session)}")
+    
+    # Explicit authentication check
+    if 'admin_authenticated' not in session or not session['admin_authenticated']:
+        logging.warning("Unauthenticated access attempt to admin panel")
+        return redirect(url_for('admin_login'))
+    
     return render_template('admin.html', tenants=CONFIG["tenants"], default_tenant=DEFAULT_TENANT)
 
 # Configuration Management Routes
@@ -1490,7 +1917,60 @@ def send_to_alchemy():
             "message": str(e)
         }), 500
 
-# Legacy Data Processing Functions (assuming these exist or need to be implemented)
+# Helper function to extract examples for extraction patterns
+def get_extraction_examples(doc_type):
+    """Get sample extraction patterns for the given document type"""
+    examples = {}
+    
+    if doc_type == "sds":
+        examples = {
+            "product_name": {
+                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
+                "example": "Product Name: Acetone"
+            },
+            "cas_number": {
+                "pattern": r"CAS\s+Number\s*[:.]\s*([0-9\-]+)",
+                "example": "CAS Number: 67-64-1"
+            },
+            "hazard_codes": {
+                "pattern": r"\b(H\d{3}[A-Za-z]?)\b",
+                "example": "Hazard Codes: H225, H319, H336"
+            }
+        }
+    elif doc_type == "tds":
+        examples = {
+            "product_name": {
+                "pattern": r"Product\s+Name\s*[:.]\s*([^\n]+)",
+                "example": "Product Name: TechBond Adhesive X-500"
+            },
+            "density": {
+                "pattern": r"(?:Density|Specific\s+Gravity)\s*[:.]\s*([\d.,]+\s*(?:g/cm3|kg/m3|g/mL))",
+                "example": "Density: 1.05 g/cm3"
+            },
+            "storage_conditions": {
+                "pattern": r"Storage(?:\s+conditions?)?\s*[:.]\s*([^\n]+)",
+                "example": "Storage conditions: Store at 5-25°C"
+            }
+        }
+    elif doc_type == "coa":
+        examples = {
+            "batch_number": {
+                "pattern": r"(?:Batch|Lot)\s+(?:Number|No|#)\s*[:.]\s*([A-Za-z0-9\-]+)",
+                "example": "Batch Number: ABC123"
+            },
+            "purity": {
+                "pattern": r"(?:Purity|Assay)\s*[:.]\s*([\d.]+\s*%)",
+                "example": "Purity: 99.8%"
+            },
+            "test_results": {
+                "pattern": "Complex extraction logic",
+                "example": "Test Results: multiple fields extracted as objects"
+            }
+        }
+    
+    return examples
+
+# Legacy Data Processing Functions
 def adapt_ai_result_to_legacy_format(ai_result):
     """Convert AI processor result to format expected by the UI"""
     # Implementation depends on your AI processor output format
@@ -1568,88 +2048,6 @@ def parse_coa_data(text):
             data["density"] = density_match.group(1).strip()
     
     return data
-
-# Verifying model persistence
-@app.route('/api/verify-persistence', methods=['GET'])
-def verify_persistence():
-    """Verify that model persistence is working correctly"""
-    try:
-        model_dir = MODEL_STATE_DIR
-        test_file = os.path.join(model_dir, 'persistence_test.pkl')
-        test_data = {"test": True, "timestamp": datetime.now().isoformat()}
-        
-        # Test directory permissions
-        dir_exists = os.path.exists(model_dir)
-        dir_writable = os.access(model_dir, os.W_OK) if dir_exists else False
-        
-        # Create directory if it doesn't exist
-        if not dir_exists:
-            try:
-                os.makedirs(model_dir, exist_ok=True)
-                dir_exists = os.path.exists(model_dir)
-                dir_writable = os.access(model_dir, os.W_OK)
-            except Exception as e:
-                return jsonify({
-                    "status": "error",
-                    "message": f"Failed to create model directory: {e}",
-                    "step": "directory_creation"
-                }), 500
-        
-        # Check if we can write to the directory
-        if not dir_writable:
-            return jsonify({
-                "status": "error",
-                "message": "Model directory exists but is not writable",
-                "step": "permission_check",
-                "dir": model_dir
-            }), 500
-        
-        # Try to write a test file
-        try:
-            with open(test_file, 'wb') as f:
-                pickle.dump(test_data, f)
-        except Exception as e:
-            return jsonify({
-                "status": "error",
-                "message": f"Failed to write test file: {e}",
-                "step": "write_test"
-            }), 500
-        
-        # Try to read the test file
-        try:
-            with open(test_file, 'rb') as f:
-                loaded_data = pickle.load(f)
-        except Exception as e:
-            return jsonify({
-                "status": "error",
-                "message": f"Failed to read test file: {e}",
-                "step": "read_test"
-            }), 500
-        
-        # List all model files
-        try:
-            model_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
-        except Exception as e:
-            model_files = [f"Error listing files: {e}"]
-        
-        # Return success
-        return jsonify({
-            "status": "success",
-            "message": "Model persistence is working correctly",
-            "test_data": loaded_data,
-            "directory": {
-                "path": model_dir,
-                "exists": dir_exists,
-                "writable": dir_writable
-            },
-            "model_files": model_files
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"Verification failed: {e}",
-            "step": "general"
-        }), 500
 
 # Main Application Runner
 if __name__ == '__main__':

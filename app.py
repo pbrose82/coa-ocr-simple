@@ -9,6 +9,9 @@ import secrets
 import uuid
 import re
 from datetime import datetime, timedelta
+import types
+import pickle
+from collections import defaultdict
 
 # Third-party imports
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -66,7 +69,66 @@ if ai_available:
         logging.info("Enhanced AI Document Processor initialized successfully")
     except Exception as e:
         logging.error(f"Error initializing Enhanced AI Document Processor: {e}")
+# Create models directory
+os.makedirs('models', exist_ok=True)
 
+# Monkey-patch the save_model_state method to make it tenant-aware
+if ai_processor is not None:
+    # Define the tenant-aware save_model_state method
+    def save_model_state(self):
+        """Save model state with tenant-specific path"""
+        try:
+            # Check if we have a tenant ID
+            tenant_id = getattr(self, 'tenant_id', 'default')
+            
+            model_dir = os.environ.get('MODEL_STATE_DIR', 'models')
+            os.makedirs(model_dir, exist_ok=True)
+            model_path = os.path.join(model_dir, f"{tenant_id}_model_state.pkl")
+            
+            with open(model_path, "wb") as f:
+                pickle.dump({
+                    "document_schemas": self.document_schemas,
+                    "training_history": self.training_history,
+                    "document_examples": self.document_examples,
+                    "field_patterns": self.field_patterns,
+                    "auto_trained_fields": self.auto_trained_fields
+                }, f)
+            logging.info(f"Model state saved for tenant {tenant_id}")
+            return "Model state saved"
+        except Exception as e:
+            logging.error(f"Error saving model state: {e}")
+            return f"Error saving model state: {e}"
+    
+    # Apply the monkey patch
+    ai_processor.save_model_state = types.MethodType(save_model_state, ai_processor)
+    
+    # Also add a tenant-aware load_model_state method
+    def load_model_state(self):
+        """Load model state from tenant-specific path"""
+        try:
+            # Check if we have a tenant ID
+            tenant_id = getattr(self, 'tenant_id', 'default')
+            
+            model_dir = os.environ.get('MODEL_STATE_DIR', 'models')
+            model_path = os.path.join(model_dir, f"{tenant_id}_model_state.pkl")
+            
+            if os.path.exists(model_path):
+                with open(model_path, "rb") as f:
+                    state = pickle.load(f)
+                    self.document_schemas = state.get("document_schemas", {})
+                    self.training_history = state.get("training_history", [])
+                    self.document_examples = state.get("document_examples", {})
+                    self.field_patterns = state.get("field_patterns", {})
+                    self.auto_trained_fields = state.get("auto_trained_fields", defaultdict(set))
+                logging.info(f"Model state loaded for tenant {tenant_id}")
+            else:
+                logging.info(f"No saved model state found for tenant {tenant_id}")
+        except Exception as e:
+            logging.error(f"Error loading model state for tenant {tenant_id}: {e}")
+            
+    # Apply the second monkey patch
+    ai_processor.load_model_state = types.MethodType(load_model_state, ai_processor)
+    
 # Configuration Management Functions
 def ensure_config_directory():
     """Ensure the configuration directory exists"""
@@ -165,7 +227,43 @@ def save_config(config):
     except Exception as e:
         logging.error(f"Unexpected error saving configuration: {str(e)}")
         return False
+        
+# Dictionary to store tenant-specific AI processors
+tenant_processors = {}
 
+def get_tenant_processor(tenant_id):
+    """Get or create an AI processor for a specific tenant"""
+    global tenant_processors
+    
+    if tenant_id not in tenant_processors:
+        try:
+            processor = AIDocumentProcessor()
+            processor.tenant_id = tenant_id  # Add tenant ID to processor
+            
+            # Load tenant-specific model if it exists
+            model_dir = os.environ.get('MODEL_STATE_DIR', 'models')
+            os.makedirs(model_dir, exist_ok=True)
+            model_path = os.path.join(model_dir, f"{tenant_id}_model_state.pkl")
+            
+            if os.path.exists(model_path):
+                with open(model_path, "rb") as f:
+                    state = pickle.load(f)
+                    processor.document_schemas = state.get("document_schemas", {})
+                    processor.training_history = state.get("training_history", [])
+                    processor.document_examples = state.get("document_examples", {})
+                    processor.field_patterns = state.get("field_patterns", {})
+                    processor.auto_trained_fields = state.get("auto_trained_fields", defaultdict(set))
+                logging.info(f"Model state loaded for tenant {tenant_id}")
+            
+            tenant_processors[tenant_id] = processor
+            logging.info(f"Created AI processor for tenant {tenant_id}")
+        except Exception as e:
+            logging.error(f"Error creating AI processor for tenant {tenant_id}: {e}")
+            # Fall back to default processor
+            tenant_processors[tenant_id] = ai_processor
+    
+    return tenant_processors[tenant_id]
+    
 def get_tenant_config(tenant_id):
     """Get tenant configuration from config file"""
     if tenant_id not in CONFIG["tenants"]:
@@ -429,75 +527,17 @@ def model_explorer():
                           tenant_name=tenant_config['display_name'])
 
 
-# Add this route to app.py
-@app.route('/api/update-pattern', methods=['POST'])
-def update_pattern():
-    """API endpoint to update extraction patterns for fields"""
-    if not ai_processor:
-        return jsonify({"status": "error", "message": "AI processor not available"}), 500
-    
-    data = request.json
-    if not data:
-        return jsonify({"status": "error", "message": "No data provided"}), 400
-        
-    doc_type = data.get('doc_type')
-    field = data.get('field')
-    pattern = data.get('pattern')
-    
-    if not doc_type or not field or not pattern:
-        return jsonify({
-            "status": "error", 
-            "message": "Missing required fields (doc_type, field, pattern)"
-        }), 400
-    
-    try:
-        # Check if the document type exists in field patterns
-        if not hasattr(ai_processor, 'field_patterns'):
-            return jsonify({
-                "status": "error", 
-                "message": "Field patterns not available in AI processor"
-            }), 500
-            
-        if doc_type not in ai_processor.field_patterns:
-            # Initialize this document type if it doesn't exist
-            ai_processor.field_patterns[doc_type] = {}
-        
-        # Update the pattern
-        ai_processor.field_patterns[doc_type][field] = pattern
-        
-        # Save the model state
-        ai_processor.save_model_state()
-        
-        # Log the update
-        logging.info(f"Updated pattern for {doc_type}/{field}")
-        
-        # Add to training history
-        training_record = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "doc_type": doc_type,
-            "field": field,
-            "action": "update_pattern",
-            "pattern": pattern
-        }
-        
-        if hasattr(ai_processor, 'training_history'):
-            ai_processor.training_history.append(training_record)
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Successfully updated pattern for {field} in {doc_type}"
-        })
-        
-    except Exception as e:
-        logging.error(f"Error updating pattern: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": f"Error updating pattern: {str(e)}"
-        }), 500
+
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""
-    if not ai_processor:
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:  # Changed from ai_processor to tenant_processor
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
     
     try:
@@ -702,32 +742,25 @@ def extract():
             except Exception as e:
                 logging.warning(f"Failed to remove temp file: {e}")
             
-            # Use AI-based processing if available
-            if ai_processor is not None:
-                logging.info("Using AI Document Processor for enhanced extraction")
-                ai_start = time.time()
-                
+            # Use tenant_processor instead of ai_processor when processing documents
+            if tenant_processor is not None:
+                logging.info(f"Using tenant-specific AI processor for tenant {current_tenant}")
                 try:
-                    # Process with AI
-                    ai_result = ai_processor.process_document(text)
-                    logging.info(f"AI processing completed in {time.time() - ai_start:.2f} seconds")
-                    
-                    # Convert AI result to format compatible with existing UI
-                    data = adapt_ai_result_to_legacy_format(ai_result)
-                    data['full_text'] = text
-                    
-                except Exception as e:
-                    logging.error(f"AI processing failed, falling back to legacy parser: {e}")
-                    # Fall back to legacy processing
-                    data = parse_coa_data(text)
-                    data['full_text'] = text
-            else:
-                # Use legacy processing
-                logging.info("Using legacy parser (AI not available)")
-                parsing_start = time.time()
-                data = parse_coa_data(text)
-                logging.info(f"Legacy parsing completed in {time.time() - parsing_start:.2f} seconds")
-                data['full_text'] = text
+                    # Process with tenant-specific AI
+                    ai_result = tenant_processor.process_document(text)
+        
+    except Exception as e:
+        logging.error(f"AI processing failed, falling back to legacy parser: {e}")
+        # Fall back to legacy processing
+        data = parse_coa_data(text)
+        data['full_text'] = text
+else:
+    # Use legacy processing
+    logging.info("Using legacy parser (AI not available)")
+    parsing_start = time.time()
+    data = parse_coa_data(text)
+    logging.info(f"Legacy parsing completed in {time.time() - parsing_start:.2f} seconds")
+    data['full_text'] = text
             
             # Add tenant information to the data
             data['tenant'] = current_tenant
@@ -766,10 +799,100 @@ def extract():
     
     return jsonify({"error": "File type not allowed"}), 400
 
+# ADD THIS NEW ROUTE to your app.py file
+
+@app.route('/api/update-pattern', methods=['POST'])
+def update_pattern():
+    """API endpoint to update extraction patterns for fields with tenant-specific processor"""
+    # SECTION 1: GET THE TENANT-SPECIFIC PROCESSOR
+    # ------------------------------------------
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    # SECTION 2: VALIDATE THE REQUEST DATA
+    # -----------------------------------
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+        
+    doc_type = data.get('doc_type')
+    field = data.get('field')
+    pattern = data.get('pattern')
+    
+    if not doc_type or not field or not pattern:
+        return jsonify({
+            "status": "error", 
+            "message": "Missing required fields (doc_type, field, pattern)"
+        }), 400
+    
+    # SECTION 3: UPDATE THE PATTERN IN THE MODEL
+    # ----------------------------------------
+    try:
+        # Check if the document type exists in field patterns
+        if not hasattr(tenant_processor, 'field_patterns'):
+            return jsonify({
+                "status": "error", 
+                "message": "Field patterns not available in AI processor"
+            }), 500
+            
+        if doc_type not in tenant_processor.field_patterns:
+            # Initialize this document type if it doesn't exist
+            tenant_processor.field_patterns[doc_type] = {}
+        
+        # Update the pattern
+        tenant_processor.field_patterns[doc_type][field] = pattern
+        
+        # Save the model state
+        tenant_processor.save_model_state()
+        
+        # Log the update
+        logging.info(f"Updated pattern for {doc_type}/{field} in tenant {current_tenant}")
+        
+        # SECTION 4: RECORD THE CHANGE IN TRAINING HISTORY
+        # ----------------------------------------------
+        # Add to training history
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "field": field,
+            "action": "update_pattern",
+            "pattern": pattern,
+            "tenant": current_tenant
+        }
+        
+        if hasattr(tenant_processor, 'training_history'):
+            tenant_processor.training_history.append(training_record)
+        
+        # SECTION 5: RETURN SUCCESS RESPONSE
+        # ---------------------------------
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully updated pattern for {field} in {doc_type}"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating pattern: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"Error updating pattern: {str(e)}"
+        }), 500
+        
 # Route for Training the AI
 @app.route('/train', methods=['POST'])
 def train():
-    if not ai_processor:
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+
+    # Get tenant-specific processor
+    tenant_processor = get_tenant_processor(current_tenant)
+    
+    if not tenant_processor:  # Changed from ai_processor to tenant_processor
         return jsonify({"status": "error", "message": "AI processor not available"}), 500
         
     if 'file' not in request.files:
@@ -778,6 +901,9 @@ def train():
     file = request.files['file']
     doc_type = request.form.get('doc_type', 'unknown')
     annotations_json = request.form.get('annotations', '{}')
+
+# Get tenant-specific processor
+tenant_processor = get_tenant_processor(current_tenant)
     
     try:
         annotations = json.loads(annotations_json)
@@ -817,8 +943,12 @@ def train():
             except:
                 pass
                 
-            # Train AI processor with extracted text
-            result = ai_processor.train_from_example(text, doc_type, annotations)
+            # Train tenant-specific processor with extracted text
+            result = tenant_processor.train_from_example(text, doc_type, annotations)
+            
+            # Save the model state
+            tenant_processor.save_model_state()
+            
             return jsonify(result)
             
         except Exception as e:

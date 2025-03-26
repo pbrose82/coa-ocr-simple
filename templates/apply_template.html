@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apply Template - Alchemy OCR Intelligence</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-container">
+            <i class="fas fa-file-import header-logo"></i>
+            <h1 class="header-title">Apply Template</h1>
+        </div>
+    </div>
+    
+    <!-- App Info Banner -->
+    <div class="tenant-banner">
+        <div class="tenant-container">
+            <div class="tenant-info">
+                Apply the "{{ template.name }}" template to extract data from your document
+            </div>
+        </div>
+        <a href="/templates" class="back-button">
+            <i class="fas fa-arrow-left"></i> BACK TO TEMPLATES
+        </a>
+    </div>
+    
+    <!-- Main Content -->
+    <div class="main-content" style="max-width: 800px;">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Template Details</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Template Name:</strong> {{ template.name }}</p>
+                        <p><strong>Document Type:</strong> {{ template.doc_type.upper() }}</p>
+                        <p><strong>Created:</strong> {{ template.created_at[:10] }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Fields:</strong></p>
+                        <div>
+                            {% for field in template.field_mappings.keys() %}
+                            <span class="badge bg-light text-dark mb-1 me-1">{{ field }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Upload Document</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    <div class="mb-4">
+                        <label class="form-label">Select Document to Process</label>
+                        <div class="file-upload" id="fileDropZone">
+                            <div class="file-upload-icon">
+                                <i class="fas fa-file-alt"></i>
+                            </div>
+                            <p class="file-upload-text">Drag & drop your document here</p>
+                            <p class="file-upload-hint">or</p>
+                            <label for="file" class="custom-file-upload">Choose File</label>
+                            <input type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.pdf,.tiff" hidden>
+                            <div id="fileName" class="file-info" style="display: none;">
+                                <i class="fas fa-file-alt"></i>
+                                <span id="fileNameText"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary" id="processBtn" disabled>
+                            <i class="fas fa-magic me-2"></i> Process Document with Template
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <div class="footer">
+        <div class="footer-content">
+            <img src="{{ url_for('static', filename='Alchemy-logo.svg') }}" alt="Alchemy Cloud Logo" class="footer-logo">
+            <div class="copyright">© ALCHEMY CLOUD, INC. ALL RIGHTS RESERVED.</div>
+        </div>
+    </div>
+    
+    <!-- JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('file');
+            const fileName = document.getElementById('fileName');
+            const fileNameText = document.getElementById('fileNameText');
+            const fileDropZone = document.getElementById('fileDropZone');
+            const processBtn = document.getElementById('processBtn');
+            
+            // File input change handler
+            fileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    fileNameText.textContent = this.files[0].name;
+                    fileName.style.display = 'flex';
+                    fileDropZone.classList.add('file-selected');
+                    processBtn.disabled = false;
+                }
+            });
+            
+            // Drag and drop handling
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                fileDropZone.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                fileDropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                fileDropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                fileDropZone.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                fileDropZone.classList.remove('highlight');
+            }
+            
+            fileDropZone.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    fileNameText.textContent = files[0].name;
+                    fileName.style.display = 'flex';
+                    fileDropZone.classList.add('file-selected');
+                    processBtn.disabled = false;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

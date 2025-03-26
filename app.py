@@ -378,8 +378,14 @@ def health():
 
 @app.route('/training')
 def training():
-    """Route for the training page"""
-    return render_template('training.html')
+    """Route for the training page with tenant information"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    return render_template('training.html', 
+                          tenant=current_tenant, 
+                          tenant_name=tenant_config['display_name'])
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
@@ -413,9 +419,81 @@ def model_info():
 
 @app.route('/model-explorer')
 def model_explorer():
-    """Display the AI model explorer page"""
-    return render_template('model_explorer.html')
+    """Display the AI model explorer page with tenant information"""
+    # Get current tenant from session or use default
+    current_tenant = session.get('tenant', DEFAULT_TENANT)
+    tenant_config = get_tenant_config(current_tenant)
+    
+    return render_template('model_explorer.html',
+                          tenant=current_tenant,
+                          tenant_name=tenant_config['display_name'])
 
+
+# Add this route to app.py
+@app.route('/api/update-pattern', methods=['POST'])
+def update_pattern():
+    """API endpoint to update extraction patterns for fields"""
+    if not ai_processor:
+        return jsonify({"status": "error", "message": "AI processor not available"}), 500
+    
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+        
+    doc_type = data.get('doc_type')
+    field = data.get('field')
+    pattern = data.get('pattern')
+    
+    if not doc_type or not field or not pattern:
+        return jsonify({
+            "status": "error", 
+            "message": "Missing required fields (doc_type, field, pattern)"
+        }), 400
+    
+    try:
+        # Check if the document type exists in field patterns
+        if not hasattr(ai_processor, 'field_patterns'):
+            return jsonify({
+                "status": "error", 
+                "message": "Field patterns not available in AI processor"
+            }), 500
+            
+        if doc_type not in ai_processor.field_patterns:
+            # Initialize this document type if it doesn't exist
+            ai_processor.field_patterns[doc_type] = {}
+        
+        # Update the pattern
+        ai_processor.field_patterns[doc_type][field] = pattern
+        
+        # Save the model state
+        ai_processor.save_model_state()
+        
+        # Log the update
+        logging.info(f"Updated pattern for {doc_type}/{field}")
+        
+        # Add to training history
+        training_record = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "doc_type": doc_type,
+            "field": field,
+            "action": "update_pattern",
+            "pattern": pattern
+        }
+        
+        if hasattr(ai_processor, 'training_history'):
+            ai_processor.training_history.append(training_record)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully updated pattern for {field} in {doc_type}"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating pattern: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"Error updating pattern: {str(e)}"
+        }), 500
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""

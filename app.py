@@ -525,6 +525,7 @@ def model_explorer():
     return render_template('model_explorer.html',
                           tenant=current_tenant,
                           tenant_name=tenant_config['display_name'])
+
 @app.route('/api/model-data')
 def get_model_data():
     """API endpoint to get model data for the explorer interface"""
@@ -661,6 +662,7 @@ def get_extraction_examples(doc_type):
         }
     
     return examples
+
 @app.route('/extract', methods=['POST'])
 def extract():
     # Get current tenant from session or use default
@@ -804,8 +806,6 @@ def extract():
     return jsonify({"error": "File type not allowed"}), 400
 
 
-# ADD THIS NEW ROUTE to your app.py file
-
 @app.route('/api/update-pattern', methods=['POST'])
 def update_pattern():
     """API endpoint to update extraction patterns for fields with tenant-specific processor"""
@@ -887,7 +887,8 @@ def update_pattern():
             "status": "error",
             "message": f"Error updating pattern: {str(e)}"
         }), 500
-   @app.route('/train', methods=['POST'])
+
+@app.route('/train', methods=['POST'])
 def train():
     # Get current tenant from session or use default
     current_tenant = session.get('tenant', DEFAULT_TENANT)

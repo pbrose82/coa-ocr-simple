@@ -13,6 +13,10 @@
             margin-bottom: 20px;
             transition: all 0.3s ease;
         }
+    </script>
+    
+    <!-- Bootstrap JS Bundle - Placed at the end for faster page loading -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js" integrity="sha384-w76AqPfDkMBDXo30jS1Sgez6pr3x5MlQ1ZAGC+nuZB+EYdgRZgiwxhTBTkF7CXvN" crossorigin="anonymous"></script>
         
         .model-card:hover {
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
@@ -178,6 +182,42 @@
         .modal-dialog {
             max-width: 600px;
         }
+
+        /* Debug console styles */
+        #debugInfo {
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        #debugContent {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Notification styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            color: white;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 9999;
+            max-width: 350px;
+        }
+
+        .notification-success {
+            background-color: var(--alchemy-green);
+        }
+
+        .notification-error {
+            background-color: var(--alchemy-red);
+        }
+
+        .notification-info {
+            background-color: var(--alchemy-blue);
+        }
     </style>
 </head>
 <body>
@@ -225,8 +265,9 @@
         </div>
         
         <!-- Debug Info -->
-        <div id="debugInfo" class="alert alert-info mt-4" style="display: none;">
+        <div id="debugInfo" class="alert alert-info mt-4">
             <h5><i class="fas fa-bug me-2"></i> Debug Information</h5>
+            <button id="toggleDebug" class="btn btn-sm btn-outline-primary float-end">Hide</button>
             <div id="debugContent"></div>
         </div>
     </div>
@@ -312,7 +353,7 @@
         </div>
     </template>
     
-    <!-- Pattern Editor Modal (pre-create it) -->
+    <!-- Pattern Editor Modal -->
     <div class="modal fade" id="patternEditorModal" tabindex="-1" aria-labelledby="patternEditorModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -354,7 +395,6 @@
             const debugContent = document.getElementById('debugContent');
             
             if (debugInfo && debugContent) {
-                debugInfo.style.display = 'block';
                 const timestamp = new Date().toLocaleTimeString();
                 const debugLine = document.createElement('div');
                 debugLine.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
@@ -368,10 +408,76 @@
                 }
                 
                 debugContent.appendChild(debugLine);
+                debugContent.scrollTop = debugContent.scrollHeight;
             }
         }
         
         document.addEventListener('DOMContentLoaded', function() {
+            // Set up debug toggle
+            const toggleDebugBtn = document.getElementById('toggleDebug');
+            const debugInfo = document.getElementById('debugInfo');
+            const debugContent = document.getElementById('debugContent');
+            
+            if (toggleDebugBtn && debugInfo) {
+                toggleDebugBtn.addEventListener('click', function() {
+                    if (debugContent.style.display === 'none') {
+                        debugContent.style.display = 'block';
+                        toggleDebugBtn.textContent = 'Hide';
+                    } else {
+                        debugContent.style.display = 'none';
+                        toggleDebugBtn.textContent = 'Show';
+                    }
+                });
+        }
+        
+        function showError(message) {
+            const container = document.getElementById('modelsContainer');
+            
+            // Show the container
+            container.style.display = 'block';
+            
+            // Show error message
+            container.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i>
+                        ${message}
+                    </div>
+                </div>
+            `;
+        }
+
+        function showNotification(message, type) {
+            // Create notification element if it doesn't exist
+            let notification = document.getElementById('notification');
+            if (!notification) {
+                notification = document.createElement('div');
+                notification.id = 'notification';
+                notification.className = `notification notification-${type}`;
+                document.body.appendChild(notification);
+            } else {
+                notification.className = `notification notification-${type}`;
+            }
+            
+            // Set message content
+            notification.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>${message}`;
+            
+            // Show the notification
+            notification.style.display = 'block';
+            
+            // Hide after 3 seconds
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transition = 'opacity 0.5s';
+                
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                    notification.style.opacity = '1';
+                }, 500);
+            }, 3000);
+        }
+            }
+            
             // Check if we came from the training page
             const referrer = document.referrer;
             if (referrer && referrer.includes('/training')) {
@@ -392,6 +498,26 @@
                 document.body.prepend(errorMsg);
             } else {
                 debug('Bootstrap JS loaded successfully');
+            }
+            
+            // Test modal initialization
+            try {
+                const modalElement = document.getElementById('patternEditorModal');
+                if (modalElement) {
+                    debug('Modal element found in DOM');
+                    
+                    // Try initializing the modal
+                    try {
+                        const testModal = new bootstrap.Modal(modalElement);
+                        debug('Test modal initialization successful');
+                    } catch (e) {
+                        debug('Error during test modal initialization', { error: e.message });
+                    }
+                } else {
+                    debug('Modal element NOT found in DOM');
+                }
+            } catch (e) {
+                debug('Error checking modal element', { error: e.message });
             }
         });
         
@@ -438,10 +564,7 @@
                 document.getElementById('loading').style.display = 'none';
             });
         }
-    </script>
-    
-    <!-- JavaScript for Model Explorer -->
-    <script>
+
         function renderModelData(data) {
             const container = document.getElementById('modelsContainer');
             const schemas = data.document_schemas;
@@ -501,6 +624,7 @@
                     fieldBadge.className = 'field-badge';
                     fieldBadge.textContent = field;
                     fieldBadge.dataset.docType = docType;
+                    fieldBadge.dataset.field = field;
                     fieldsList.appendChild(fieldBadge);
                 });
                 
@@ -570,9 +694,10 @@
             // Handle field badge clicks
             document.querySelectorAll('.field-badge').forEach(badge => {
                 badge.addEventListener('click', function() {
-                    debug('Field badge clicked: ' + this.textContent);
-                    const fieldName = this.textContent.trim();
+                    const fieldName = this.dataset.field;
                     const docType = this.dataset.docType;
+                    debug('Field badge clicked', { field: fieldName, docType: docType });
+                    
                     const modelCard = this.closest('.model-card');
                     
                     // Switch to extraction tab
@@ -622,7 +747,7 @@
                     if (data.status === 'success') {
                         const examples = data.extraction_examples[docType];
                         
-                        if (examples && examples.examples[fieldName]) {
+                        if (examples && examples.examples && examples.examples[fieldName]) {
                             const example = examples.examples[fieldName];
                             
                             // Set pattern
@@ -643,8 +768,8 @@
                             editBtn.className = 'btn btn-sm btn-outline-primary mt-2 edit-pattern-btn';
                             editBtn.innerHTML = '<i class="fas fa-edit me-1"></i> Edit Pattern';
                             editBtn.onclick = function(event) {
-                                debug(`Edit button clicked for ${docType}/${fieldName}`);
                                 event.preventDefault();
+                                debug(`Edit button clicked for ${docType}/${fieldName}`);
                                 showPatternEditor(docType, fieldName, example.pattern);
                             };
                             patternContainer.appendChild(editBtn);
@@ -659,6 +784,8 @@
                             
                             debug(`No examples found for ${docType}/${fieldName}`);
                         }
+                    } else {
+                        debug(`Error fetching examples: ${data.message}`);
                     }
                 })
                 .catch(error => {
@@ -673,35 +800,54 @@
             try {
                 // Get the modal element
                 const modalElement = document.getElementById('patternEditorModal');
+                debug('Modal element found:', !!modalElement);
                 
-                // Check if Bootstrap is loaded
+                if (!modalElement) {
+                    throw new Error('Modal element not found in the DOM');
+                }
+                
+                // Populate the form fields
+                document.getElementById('docTypeInput').value = docType || '';
+                document.getElementById('fieldNameInput').value = fieldName || '';
+                document.getElementById('patternInput').value = currentPattern || '';
+                
+                // Check if Bootstrap is available
                 if (typeof bootstrap === 'undefined') {
-                    console.error('Bootstrap JS is not loaded. Cannot show modal.');
-                    debug('ERROR: Bootstrap JS not loaded - cannot open editor');
-                    alert('Cannot open editor: Bootstrap JavaScript is not loaded. Please refresh the page.');
+                    console.error('Bootstrap JS not loaded properly');
+                    showNotification('Error: Bootstrap JavaScript not loaded. Please refresh the page.', 'error');
                     return;
                 }
                 
-                // Fill in the form
-                document.getElementById('docTypeInput').value = docType;
-                document.getElementById('fieldNameInput').value = fieldName;
-                document.getElementById('patternInput').value = currentPattern;
-                
-                // Initialize and show the modal
-                const modal = new bootstrap.Modal(modalElement);
-                modal.show();
-                
-                // Handle save button
-                const saveBtn = document.getElementById('savePatternBtn');
-                saveBtn.onclick = function() {
-                    const newPattern = document.getElementById('patternInput').value;
-                    debug('Save button clicked', { docType, fieldName, newPattern });
-                    savePattern(docType, fieldName, newPattern, modal);
-                };
+                // Create the modal instance and show it
+                try {
+                    const modal = new bootstrap.Modal(modalElement);
+                    debug('Modal initialized successfully');
+                    modal.show();
+                    
+                    // Set up the save button
+                    const saveBtn = document.getElementById('savePatternBtn');
+                    if (saveBtn) {
+                        // Remove any existing event listeners
+                        const newSaveBtn = saveBtn.cloneNode(true);
+                        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+                        
+                        newSaveBtn.addEventListener('click', function() {
+                            const newPattern = document.getElementById('patternInput').value;
+                            debug('Save button clicked', { docType, fieldName, newPattern });
+                            savePattern(docType, fieldName, newPattern, modal);
+                        });
+                    } else {
+                        debug('Save button not found in modal');
+                    }
+                } catch (modalError) {
+                    console.error('Error creating modal:', modalError);
+                    debug('Error creating modal', { error: modalError.message });
+                    showNotification('Error initializing modal: ' + modalError.message, 'error');
+                }
             } catch (error) {
-                console.error('Error showing pattern editor:', error);
-                debug('Error showing pattern editor: ' + error.message);
-                alert('Error opening pattern editor: ' + error.message);
+                console.error('Error in showPatternEditor:', error);
+                debug('Error in showPatternEditor', { error: error.message });
+                showNotification('Error showing pattern editor: ' + error.message, 'error');
             }
         }
         
@@ -725,84 +871,3 @@
                     field: fieldName,
                     pattern: pattern
                 })
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Hide the modal
-                modal.hide();
-                
-                if (data.status === 'success') {
-                    // Show success message
-                    debug('Pattern saved successfully');
-                    showNotification('Pattern updated successfully!', 'success');
-                    
-                    // Refresh the data (force cache refresh)
-                    fetchModelData(true);
-                } else {
-                    debug('Error saving pattern: ' + data.message);
-                    showNotification(`Error: ${data.message}`, 'error');
-                }
-            })
-            .catch(error => {
-                console.error('Error updating pattern:', error);
-                debug('Error updating pattern: ' + error.message);
-                showNotification('Error updating pattern', 'error');
-            })
-            .finally(() => {
-                // Reset the button
-                saveBtn.innerHTML = originalText;
-                saveBtn.disabled = false;
-            });
-        }
-        
-        function showError(message) {
-            const container = document.getElementById('modelsContainer');
-            
-            // Show the container
-            container.style.display = 'block';
-            
-            // Show error message
-            container.innerHTML = `
-                <div class="col-12">
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-circle me-2"></i>
-                        ${message}
-                    </div>
-                </div>
-            `;
-        }
-
-        function showNotification(message, type) {
-            // Create notification element if it doesn't exist
-            let notification = document.getElementById('notification');
-            if (!notification) {
-                notification = document.createElement('div');
-                notification.id = 'notification';
-                notification.className = `alert alert-${type} position-fixed p-3`;
-                notification.style.top = '20px';
-                notification.style.right = '20px';
-                notification.style.zIndex = '9999';
-                notification.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
-                notification.style.maxWidth = '400px';
-                document.body.appendChild(notification);
-            } else {
-                notification.className = `alert alert-${type} position-fixed p-3`;
-            }
-            
-            // Set message content
-            notification.innerHTML = message;
-            
-            // Show the notification
-            notification.style.display = 'block';
-            
-            // Hide after 3 seconds
-            setTimeout(() => {
-                notification.style.display = 'none';
-            }, 3000);
-        }
-    </script>
-    
-    <!-- Bootstrap JS Bundle -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
